@@ -1,10 +1,12 @@
-# Validation — 0.1.0
+# Validation — 0.1.1
 
 Validated locally on 2026-10-13:
 
-- Rust formatting, Clippy with warnings denied, and all five tests passed.
+- Rust formatting, Clippy with warnings denied, and all six tests passed.
 - Tests cover a real TCP tree transfer, binary/Unicode files, empty directories,
   name collisions, cancellation and interrupted-transfer cleanup.
+- A delayed sender regression test covers accepted sockets from a nonblocking
+  listener. Transfer sockets explicitly use blocking mode with timeouts.
 - Windows self-contained x64 build and Inno Setup installer completed. Isolated
   silent installation and uninstallation both returned exit code 0.
 - Android signed release builds for ARM64 and x86_64 completed; APK signature

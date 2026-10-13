@@ -525,6 +525,9 @@ impl Engine {
     }
 }
 fn setup_stream(stream: &TcpStream) -> io::Result<()> {
+    // Accepted sockets can inherit the listener's nonblocking mode on Windows.
+    // Each transfer has its own worker and must wait for the sender's data.
+    stream.set_nonblocking(false)?;
     stream.set_nodelay(true)?;
     stream.set_read_timeout(Some(Duration::from_secs(15)))?;
     stream.set_write_timeout(Some(Duration::from_secs(15)))
@@ -719,6 +722,52 @@ mod tests {
             },
         ];
         assert!(validate_entries(&entries).is_err());
+    }
+    #[test]
+    fn delayed_sender_is_received_on_nonblocking_listener() {
+        let root = std::env::temp_dir().join(format!("hl100-delayed-{}", std::process::id()));
+        fs::create_dir_all(&root).unwrap();
+        let receiver = Engine::start(
+            Config {
+                id: "delayed-test".into(),
+                name: "Receiver".into(),
+                folder: root.to_string_lossy().into(),
+                port: 0,
+            },
+            Arc::new(DiskStorage::new(&root)),
+        )
+        .unwrap();
+        let mut stream = TcpStream::connect((Ipv4Addr::LOCALHOST, receiver.listener_port)).unwrap();
+        setup_stream(&stream).unwrap();
+        thread::sleep(Duration::from_millis(200));
+        frame_write(
+            &mut stream,
+            &Offer {
+                protocol: 1,
+                id: "test".into(),
+                name: "Test".into(),
+                transfer: "delayed".into(),
+                entries: vec![Entry {
+                    path: "delayed.txt".into(),
+                    size: 4,
+                    directory: false,
+                }],
+            },
+        )
+        .unwrap();
+        let reply: Value = frame_read(&mut stream).unwrap();
+        assert_eq!(reply["ok"], true);
+        thread::sleep(Duration::from_millis(200));
+        stream.write_all(b"data").unwrap();
+        let ack: Value = frame_read(&mut stream).unwrap();
+        assert_eq!(ack["ok"], true);
+        let final_ack: Value = frame_read(&mut stream).unwrap();
+        assert_eq!(final_ack["ok"], true);
+        assert_eq!(fs::read(root.join("delayed.txt")).unwrap(), b"data");
+        receiver.stop();
+        drop(stream);
+        thread::sleep(Duration::from_millis(300));
+        fs::remove_dir_all(root).unwrap();
     }
     #[test]
     fn broken_connection_removes_partial_file() {

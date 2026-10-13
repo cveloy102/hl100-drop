@@ -41,7 +41,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: aarch64-linux-android,x86_64-linux-android
-      - uses: android-actions/setup-android@v3
+      - uses: android-actions/setup-android@v4
       - run: sdkmanager 'platforms;android-37.0' 'build-tools;36.0.0' 'ndk;27.3.13750724'
       - name: Native Android libraries
         run: |
