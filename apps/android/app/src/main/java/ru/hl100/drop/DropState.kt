@@ -11,7 +11,8 @@ import java.io.IOException
 import java.util.UUID
 
 data class Peer(val id:String,val name:String,val address:String,val port:Int,val platform:String)
-data class Transfer(val id:String,val name:String,val direction:String,val total:Long,val done:Long=0,val speed:Double=0.0,val status:String="active",val message:String="")
+data class TransferFile(val path:String,val size:Long,val directory:Boolean)
+data class Transfer(val id:String,val name:String,val direction:String,val total:Long,val done:Long=0,val speed:Double=0.0,val status:String="active",val message:String="",val files:List<TransferFile> = emptyList(),val count:Int=0)
 object DropState {
     private val scope=CoroutineScope(SupervisorJob()+Dispatchers.Main)
     var bridge:NativeBridge?=null
@@ -43,7 +44,12 @@ object DropState {
         val id=e.optString("transfer")
         when(e.getString("type")) {
             "error" -> status=e.optString("message")
-            "transfer" -> transfers=(listOf(Transfer(id,e.getString("name"),e.getString("direction"),e.getLong("total")))+transfers).take(100)
+            "transfer" -> {
+                val entries=e.optJSONArray("entries")?:JSONArray()
+                val files=(0 until entries.length()).map{val entry=entries.getJSONObject(it);TransferFile(entry.getString("path"),entry.getLong("size"),entry.getBoolean("directory"))}
+                transfers=(listOf(Transfer(id,e.getString("name"),e.getString("direction"),e.getLong("total"),files=files,count=e.optInt("files",files.size)))+transfers)
+                val active=transfers.filter{it.status=="active"};transfers=active+transfers.filter{it.status!="active"}.take((100-active.size).coerceAtLeast(0))
+            }
             "progress" -> transfers=transfers.map { if(it.id==id)it.copy(done=e.getLong("done"),speed=e.getDouble("speed")) else it }
             "complete" -> transfers=transfers.map { if(it.id==id)it.copy(status=e.getString("status"),message=e.optString("message")) else it }
         }

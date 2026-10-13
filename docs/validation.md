@@ -64,3 +64,32 @@ on macOS 12 and 13+; background reception and sleep/wake;
 Developer ID signing/notarization and a real newer-version update.
 
 See `apps/macos/README.md` for build, installation and signing instructions.
+
+## Windows / Android — 0.1.2
+
+Validated locally on 2026-10-13:
+
+- All eight Rust tests, formatting and Clippy with warnings denied passed.
+  Added regressions for EINTR retry and exact collision-resolved saved paths.
+- Windows self-contained build and Inno Setup installer completed. Android
+  signed release build and APK signature verification passed.
+- Physical Poco F7 received the updated app. User confirmed Android -> Windows
+  transfer and that discovery remained available without toggling reception.
+  A ~3.5 MB JPEG arrived successfully; a ~5.3 MB PNG was sent back by drag/drop.
+- Windows received generated native C ABI/TCP transfers. Received-file buttons
+  show filenames/sizes and reveal the exact numbered copy in Explorer; selection
+  of the collision-resolved file was visually verified.
+- Embedded settings and themed scrollbar were visually inspected. Wheel
+  scrolling changed the history scrollbar offset from 0 to 48.
+- Login checkbox enabled a quoted executable command with --login in HKCU Run;
+  disabling it removed only the application's value. Original off preference
+  was restored. Duplicate normal/login launches retained one app process.
+- Notification code compiled and transfer completion exercised. The desktop
+  inspection tool did not enumerate the taskbar-hidden notification window,
+  so its appearance and timing still need a manual check.
+- The final APK was rebuilt after the saved-path fix. The phone was disconnected
+  from ADB during final reinstall; that final artifact is available in the release.
+
+No macOS binary rebuilt on this Windows host. Existing macOS verification above
+belongs to the imported macOS revision; the updated core needs a Mac rebuild.
+Actual Windows logout/login and stable-release update remain untested.

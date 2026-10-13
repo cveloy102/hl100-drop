@@ -1,5 +1,5 @@
 #ifndef AppVersion
-  #define AppVersion "0.1.1"
+  #define AppVersion "0.1.2"
 #endif
 #ifndef PublishDir
   #define PublishDir "..\..\artifacts\windows"
@@ -37,3 +37,5 @@ Name: "{group}\HL100 Drop"; Filename: "{app}\HL100Drop.exe"
 Name: "{autodesktop}\HL100 Drop"; Filename: "{app}\HL100Drop.exe"; Tasks: desktopicon
 [Run]
 Filename: "{app}\HL100Drop.exe"; Description: "Запустить HL100 Drop"; Flags: nowait postinstall skipifsilent
+[Registry]
+Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; ValueName: "HL100Drop"; Flags: uninsdeletevalue

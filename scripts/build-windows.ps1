@@ -1,4 +1,4 @@
-param([string]$Version = '0.1.1', [switch]$SkipInstaller)
+param([string]$Version = '0.1.2', [switch]$SkipInstaller)
 . "$PSScriptRoot/environment.ps1"
 Push-Location $taskRoot
 try {

@@ -24,6 +24,15 @@ const MAX_FRAME: usize = 4 * 1024 * 1024;
 const BUFFER: usize = 1024 * 1024;
 static NEXT_ID: AtomicU64 = AtomicU64::new(1);
 
+fn retry_interrupted<T>(mut operation: impl FnMut() -> io::Result<T>) -> io::Result<T> {
+    loop {
+        match operation() {
+            Err(error) if error.kind() == io::ErrorKind::Interrupted => continue,
+            result => return result,
+        }
+    }
+}
+
 #[derive(Clone, Serialize, Deserialize)]
 pub struct Config {
     pub id: String,
@@ -160,7 +169,12 @@ impl Storage for DiskStorage {
         let top = relative.components().next()?.as_os_str().to_string_lossy();
         let paths = self.paths.lock().unwrap();
         let (_, chosen) = paths.get(&key(transfer, &format!("@/{top}")))?;
-        Some(chosen.join(relative.components().skip(1).collect::<PathBuf>()))
+        let tail = relative.components().skip(1).collect::<PathBuf>();
+        Some(if tail.as_os_str().is_empty() {
+            chosen.clone()
+        } else {
+            chosen.join(tail)
+        })
     }
     fn finish(&self, transfer: &str, entry: &Entry) -> io::Result<()> {
         if entry.directory {
@@ -264,7 +278,12 @@ impl Engine {
                         worker.spawn(move || w.receive(stream));
                     }
                     Ok(_) => {}
-                    Err(err) if err.kind() == io::ErrorKind::WouldBlock => {
+                    Err(err)
+                        if matches!(
+                            err.kind(),
+                            io::ErrorKind::WouldBlock | io::ErrorKind::Interrupted
+                        ) =>
+                    {
                         thread::sleep(Duration::from_millis(50))
                     }
                     Err(err) => {
@@ -277,8 +296,24 @@ impl Engine {
         e.workers.lock().unwrap().push(handle);
         let w = e.clone();
         e.spawn(move || {
-            if let Err(err) = w.discovery() {
-                w.event(json!({"type":"error","message":format!("Обнаружение устройств: {err}")}));
+            let mut previous_error = String::new();
+            while !w.stopped.load(Ordering::Relaxed) {
+                match w.discovery() {
+                    Ok(()) => break,
+                    Err(err) => {
+                        let message = format!("Обнаружение устройств: {err}");
+                        if message != previous_error {
+                            w.event(json!({"type":"error","message":message}));
+                            previous_error = message;
+                        }
+                        for _ in 0..10 {
+                            if w.stopped.load(Ordering::Relaxed) {
+                                break;
+                            }
+                            thread::sleep(Duration::from_millis(100));
+                        }
+                    }
+                }
             }
         });
         e.event(json!({"type":"started","port":port}));
@@ -353,7 +388,7 @@ impl Engine {
                 }
                 announced = Instant::now();
             }
-            match socket.recv_from(&mut buffer) {
+            match retry_interrupted(|| socket.recv_from(&mut buffer)) {
                 Ok((n, addr)) if local_address(addr.ip()) => {
                     if let Ok(v) = serde_json::from_slice::<Value>(&buffer[..n]) {
                         let c = self.config.lock().unwrap();
@@ -390,7 +425,9 @@ impl Engine {
                 Err(e)
                     if matches!(
                         e.kind(),
-                        io::ErrorKind::WouldBlock | io::ErrorKind::TimedOut
+                        io::ErrorKind::WouldBlock
+                            | io::ErrorKind::TimedOut
+                            | io::ErrorKind::Interrupted
                     ) => {}
                 Err(e) => return Err(e),
             }
@@ -716,6 +753,45 @@ mod android;
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn saved_file_path_is_exact_after_collision() {
+        let root = std::env::temp_dir().join(format!("hl100-reveal-{}", std::process::id()));
+        fs::create_dir_all(&root).unwrap();
+        fs::write(root.join("name.txt"), b"original").unwrap();
+        let storage = DiskStorage::new(&root);
+        let entry = Entry {
+            path: "name.txt".into(),
+            size: 4,
+            directory: false,
+        };
+        let mut file = storage.open("reveal", &entry).unwrap().unwrap();
+        let saved = storage.local_path("reveal", &entry).unwrap();
+        assert_eq!(saved.as_os_str(), root.join("name (1).txt").as_os_str());
+        file.write_all(b"data").unwrap();
+        drop(file);
+        storage.finish("reveal", &entry).unwrap();
+        assert!(saved.is_file());
+        assert_eq!(fs::read(saved).unwrap(), b"data");
+        storage.abort("reveal");
+        fs::remove_dir_all(root).unwrap();
+    }
+    #[test]
+    fn interrupted_discovery_receive_retries_without_stopping() {
+        let mut calls = 0;
+        let result = retry_interrupted(|| {
+            calls += 1;
+            if calls < 3 {
+                Err(io::Error::from(io::ErrorKind::Interrupted))
+            } else {
+                Ok(42)
+            }
+        });
+        assert_eq!(result.unwrap(), 42);
+        assert_eq!(calls, 3);
+        let timeout: io::Result<()> =
+            retry_interrupted(|| Err(io::Error::from(io::ErrorKind::TimedOut)));
+        assert_eq!(timeout.unwrap_err().kind(), io::ErrorKind::TimedOut);
+    }
     use super::*;
     #[test]
     fn rejects_unsafe_paths() {

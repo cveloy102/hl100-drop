@@ -49,7 +49,7 @@ class MainActivity:ComponentActivity() {
                     var settings by remember { mutableStateOf(false) }
                     var configured by remember { mutableStateOf(DropState.name.isNotBlank()&&DropState.folder.isNotBlank()) }
                     Column(Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.safeDrawing).verticalScroll(rememberScrollState()).padding(24.dp)) {
-                        Row(Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.SpaceBetween) { Text("HL100_ DROP",fontSize=22.sp,fontFamily=FontFamily.Monospace);TextButton(onClick={if(DropState.busy)DropState.status="Дождитесь завершения передач" else settings=true}){Text("НАСТРОЙКИ ↗")} }
+                        Row(Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.SpaceBetween) { Row(verticalAlignment=androidx.compose.ui.Alignment.CenterVertically){ androidx.compose.foundation.Canvas(Modifier.size(30.dp)){ val mark=androidx.compose.ui.graphics.Path().apply{moveTo(size.width*0.52f,0f);lineTo(size.width*0.08f,size.height*0.54f);lineTo(size.width*0.44f,size.height*0.54f);lineTo(size.width*0.32f,size.height);lineTo(size.width*0.92f,size.height*0.36f);lineTo(size.width*0.56f,size.height*0.36f);lineTo(size.width*0.68f,0f);close()};drawPath(mark,Red) };Spacer(Modifier.width(12.dp));Column{Text("DROP",fontSize=32.sp,fontFamily=FontFamily.Monospace);Text("HL100_",fontSize=11.sp,color=Muted,fontFamily=FontFamily.Monospace)}};TextButton(onClick={if(DropState.busy)DropState.status="Дождитесь завершения передач" else settings=true}){Text("НАСТРОЙКИ ↗")} }
                         HorizontalDivider(Modifier.padding(vertical=20.dp),color=Color(0xFF30302D))
                         if(!configured||settings) {
                             SettingsPanel(first=!configured,onSave={name,folder,updates->
@@ -72,6 +72,8 @@ class MainActivity:ComponentActivity() {
                             if(DropState.transfers.isEmpty())Text("Твои передачи появятся здесь.",color=Muted,modifier=Modifier.padding(vertical=20.dp))
                             DropState.transfers.forEach { t->Column(Modifier.fillMaxWidth().padding(top=20.dp)) {
                                 Text("${if(t.direction=="send")"↑" else "↓"} ${t.name}",fontSize=18.sp)
+                                t.files.forEach{file->Text("${file.path} / ${if(file.directory)"ПАПКА" else bytes(file.size.toDouble())}",fontSize=13.sp,color=Paper,modifier=Modifier.padding(top=8.dp))};if(t.count>t.files.size)Text("Ещё ${t.count-t.files.size} объектов",color=Muted)
+                                if(t.status!="active")Text(bytes(t.total.toDouble()),color=Muted,fontSize=12.sp)
                                 Text(when(t.status){"done"->"Готово ✓";"cancelled"->"Отменено";"error"->"Ошибка: ${t.message}";else->"${bytes(t.done.toDouble())} / ${bytes(t.total.toDouble())}\n${bytes(t.speed)}/с"},color=Muted,modifier=Modifier.padding(vertical=8.dp))
                                 LinearProgressIndicator(progress={if(t.status=="done")1f else if(t.total>0)(t.done.toDouble()/t.total).toFloat() else 0f},modifier=Modifier.fillMaxWidth(),color=Red,trackColor=Color(0xFF30302D))
                                 if(t.status=="active")TextButton(onClick={lifecycleScope.launch{DropState.cancel(t.id)}}){Text("ОТМЕНИТЬ")}
