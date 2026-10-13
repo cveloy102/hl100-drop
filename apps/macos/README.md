@@ -17,7 +17,7 @@ rustup. Full Xcode is optional for local builds. From the repository root:
 Outputs:
 
 - `artifacts/macos/HL100 Drop.app`
-- `artifacts/HL100Drop-0.1.1-universal.dmg`
+- `artifacts/HL100Drop-<core-version>-universal.dmg`
 - `artifacts/macos/checksums.txt`
 
 Open the DMG and drag the **HL100 Drop.app inside it** to **Applications**. Start it there. On the
@@ -31,7 +31,11 @@ recipient's card. The shared drop zone sends to the selected device; without a
 selection, it stages the files until you choose a recipient and click Send.
 Dragging files over the menu-bar icon also opens the panel without activating
 the application. Dropping on the icon stages files, never sends them immediately.
-Independent transfers can run concurrently.
+Independent transfers can run concurrently. Reception holds a scoped macOS
+activity to prevent App Nap from stalling discovery while the panel is closed.
+Active transfers additionally prevent automatic idle system sleep; the activity
+ends when transfers finish. Manual sleep/lid closure still interrupts a transfer.
+Discovery refreshes interfaces and recovers socket failures without app restart.
 Incoming files are accepted automatically, as on Windows and Android. Use the
 app on a trusted local network; protocol v1 has no authentication or encryption.
 

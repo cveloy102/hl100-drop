@@ -2,7 +2,13 @@
 
 All file transfers use IPv4 TCP directly between devices in the same interface subnet. Loopback is allowed for tests. No account, pairing, TLS, compression, relay, cloud transfer or public-address fallback. IPv6 and routed cross-subnet networks are outside v1.
 
-Discovery: UDP port 41001, multicast 239.255.100.100 with TTL=1 and interface subnet broadcast. Announcements every 2 seconds, expiry after 7 seconds. Example:
+Discovery: UDP port 41001, multicast 239.255.100.100 with TTL=1 and interface subnet broadcast. Announcements every 2 seconds, expiry after 7 seconds. Interfaces are refreshed
+at each announcement; multicast is sent explicitly on each interface. Unix
+sockets use port reuse for multiple local peers. Socket/bind failures are retried
+without stopping TCP reception; local `discovery` events report `active`,
+`waiting`, or `retrying`. Sender write failures attempt to read the receiver's
+queued storage error before reporting a transport error. Network frames are
+unchanged. Example:
 
 ```json
 {"app":"hl100-drop","protocol":1,"id":"persistent-device-id","name":"My PC","port":41000,"platform":"windows"}
