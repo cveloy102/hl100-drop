@@ -70,6 +70,70 @@ fn java_result<'a>(
     }
 }
 impl Storage for AndroidStorage {
+    fn state_root(&self) -> Option<PathBuf> {
+        let mut env = self.vm.attach_current_thread().ok()?;
+        let result = env.call_method(
+            self.bridge.as_obj(),
+            "stateRoot",
+            "()Ljava/lang/String;",
+            &[],
+        );
+        let value = java_result(&mut env, result).ok()?.l().ok()?;
+        let string = JString::from(value);
+        let path: String = env.get_string(&string).ok()?.into();
+        Some(PathBuf::from(path))
+    }
+    fn reopen_source(&self, locator: &Value) -> io::Result<File> {
+        let mut env = self.vm.attach_current_thread().map_err(io::Error::other)?;
+        let uri = env
+            .new_string(
+                locator["uri"]
+                    .as_str()
+                    .ok_or_else(|| io::Error::other("Исходный файл недоступен"))?,
+            )
+            .map_err(io::Error::other)?;
+        let result = env.call_method(
+            self.bridge.as_obj(),
+            "openSourceChecked",
+            "(Ljava/lang/String;JJ)I",
+            &[
+                JValue::Object(&uri),
+                JValue::Long(locator["size"].as_u64().unwrap_or(0) as i64),
+                JValue::Long(locator["modified"].as_u64().unwrap_or(0) as i64),
+            ],
+        );
+        let fd = java_result(&mut env, result)?
+            .i()
+            .map_err(io::Error::other)?;
+        if fd < 0 {
+            return Err(io::Error::other("Исходный файл недоступен"));
+        }
+        Ok(unsafe { File::from_raw_fd(fd) })
+    }
+    fn resume_offset(&self, t: &str, e: &Entry) -> io::Result<(u64, bool)> {
+        if e.directory {
+            return Ok((0, false));
+        }
+        let mut env = self.vm.attach_current_thread().map_err(io::Error::other)?;
+        let transfer = env.new_string(t).map_err(io::Error::other)?;
+        let path = env.new_string(&e.path).map_err(io::Error::other)?;
+        let result = env.call_method(
+            self.bridge.as_obj(),
+            "resumeStatus",
+            "(Ljava/lang/String;Ljava/lang/String;)Ljava/lang/String;",
+            &[JValue::Object(&transfer), JValue::Object(&path)],
+        );
+        let value = java_result(&mut env, result)?
+            .l()
+            .map_err(io::Error::other)?;
+        let string = JString::from(value);
+        let text: String = env.get_string(&string).map_err(io::Error::other)?.into();
+        let status: (u64, bool) = serde_json::from_str(&text)?;
+        if status.0 > e.size || (status.1 && status.0 != e.size) {
+            return Err(io::Error::other("Полученный файл изменился"));
+        }
+        Ok(status)
+    }
     fn open(&self, t: &str, e: &Entry) -> io::Result<Option<File>> {
         let fd = self.call_fd(t, &e.path, e.directory)?;
         if e.directory {
@@ -155,7 +219,9 @@ pub extern "system" fn Java_ru_hl100_drop_NativeBridge_command(
                     valid_path(&entry.path)?;
                     let uri = item["uri"].as_str().unwrap_or("").to_string();
                     let s = storage.clone();
-                    let open: Option<Box<dyn FnOnce() -> io::Result<File> + Send>> =
+                    let locator =
+                        Some(json!({"uri":uri,"size":entry.size,"modified":item["modified"]}));
+                    let open: Option<Box<dyn FnMut() -> io::Result<File> + Send>> =
                         if entry.directory {
                             None
                         } else {
@@ -164,6 +230,7 @@ pub extern "system" fn Java_ru_hl100_drop_NativeBridge_command(
                     sources.push(Source {
                         entry,
                         local_path: None,
+                        locator,
                         open,
                     });
                 }

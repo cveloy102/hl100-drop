@@ -258,7 +258,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
     }
     private func makeTransferRow(_ event: [String: Any]) -> TransferRow {
         TransferRow(event: event, reveal: { [weak self] url in self?.revealFile(url) },
-                    cancelAction: { [weak self] id in self?.cancel(id) })
+                    cancelAction: { [weak self] id in self?.cancel(id) },
+                    controlAction: { [weak self] id, action in self?.controlTransfer(id, action: action) })
     }
     private func addDesktopRow(from row: TransferRow) {
         let copy = makeTransferRow(row.initialEvent)
@@ -460,6 +461,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
     }
     private func cancel(_ id: String) {
         engine.perform(["op": "cancel", "transfer": id]) { [weak self] result in
+            if case .failure(let error) = result { self?.status.stringValue = error.localizedDescription }
+        }
+    }
+    private func controlTransfer(_ id: String, action: String) {
+        engine.perform(["op": action, "transfer": id]) { [weak self] result in
             if case .failure(let error) = result { self?.status.stringValue = error.localizedDescription }
         }
     }

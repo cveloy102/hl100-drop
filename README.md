@@ -4,7 +4,7 @@ Native file sharing over a local network. Windows 10+, Android 12+, macOS 12+ In
 
 ## Layout
 
-- `core`: discovery, TCP streaming, file manifest, progress/cancellation, C ABI/JNI.
+- `core`: discovery, TCP streaming, file manifest, progress, pause/resume, durable transfer journals, C ABI/JNI.
 - `apps/windows`: native desktop UI, drag-and-drop, tray, settings, GitHub updater.
 - `apps/android`: native phone UI, SAF storage, receive service, GitHub updater.
 - `installer/windows`: Inno Setup per-user installer.
@@ -19,7 +19,7 @@ Install Rust (MSVC + Visual Studio Build Tools, or GNU + GCC MinGW), .NET 8 SDK 
 ./scripts/build-windows.ps1
 ```
 
-Output: `artifacts/HL100DropSetup-0.1.4.exe`. The published app includes its .NET runtime. Installation requires no administrator rights. The first connection may require the standard Windows Firewall prompt to allow local-network access.
+Output: `artifacts/HL100DropSetup-1.1.0.exe`. The published app includes its .NET runtime. Installation requires no administrator rights. The first connection may require the standard Windows Firewall prompt to allow local-network access.
 
 ## Android build
 
@@ -31,7 +31,7 @@ Install JDK, Android SDK 37, NDK r27d or newer, Rust targets `aarch64-linux-andr
 
 This makes a debug APK for device testing. Production APKs require a permanent signing key; set `HL100_KEYSTORE`, `HL100_STORE_PASSWORD`, `HL100_KEY_ALIAS`, `HL100_KEY_PASSWORD`, then run with `-Release`. Keep the key out of Git and preserve it for future updates.
 
-For a local signing key, run `scripts/initialize-signing.ps1` once. It saves the key and configuration in `private/` (excluded from Git). Back up both files privately. `build-android.ps1 -Release` reads this configuration automatically. Copy the resulting APK to `artifacts/HL100Drop-0.1.4.apk` before publishing.
+For a local signing key, run `scripts/initialize-signing.ps1` once. It saves the key and configuration in `private/` (excluded from Git). Back up both files privately. `build-android.ps1 -Release` reads this configuration automatically. Copy the resulting APK to `artifacts/HL100Drop-1.1.0.apk` before publishing.
 
 ## Core verification
 
@@ -42,7 +42,7 @@ cargo fmt --all --check
 
 Tests include a real loopback TCP transfer of a multi-megabyte binary with nested and empty folders, Unicode names and collision preservation. Real Windows/Android LAN validation and UI testing remain required before a stable release.
 
-Tests also verify cancellation, removal of partial files after disconnect, and rejection of colliding manifest names. `scripts/smoke-ffi.ps1` sends a generated file through the DLL's C ABI to a running receiver. The `peer` Rust example is an optional local QA node; it exits after two minutes.
+Tests also verify automatic reconnect from receiver offsets, sender/receiver restart, persistent manual pause, completed-file skipping, legacy fallback, cancellation and collision preservation. Legacy disconnects remove partial files; negotiated resume retains them. `scripts/smoke-ffi.ps1` sends a generated file through the DLL's C ABI to a running receiver. The `peer` Rust example is an optional local QA node; it exits after two minutes.
 
 ## Updates
 
@@ -59,7 +59,15 @@ Install Apple's Command Line Tools and Rust via rustup, then:
 ./scripts/test-macos.sh
 ```
 
-Output: `artifacts/HL100Drop-0.1.1-universal.dmg`. Drag the application to Applications.
+Output: `artifacts/HL100Drop-1.1.0-universal.dmg`. Drag the application to Applications.
 Both the app and Rust dylib include Intel and ARM slices. Default builds use ad-hoc
 signing for development; public distribution requires Developer ID signing and
 notarization. See `apps/macos/README.md` for usage, release signing and validation.
+
+## Pause and resume (1.1+)
+
+Both peers negotiate resume through optional fields in the existing protocol. Older peers still receive ordinary transfers; pause is available only after resume negotiation. A manually paused transfer stays paused. Interrupted transfers retry automatically; unfinished transfers are restored after restarting the application. The source must still exist and retain its size and modification time.
+
+Native storage keeps internal journals in `.drop-state` under the receive directory. This directory is excluded when sending a directory. Android keeps journals in private app storage and writes directly to seekable SAF `rw` descriptors. Local storage supports resumption; a pipe or a revoked temporary share URI can require selecting and sending the source again.
+
+`cargo run --release --example throughput -- artifacts/qa/throughput` compares raw TCP throughput with/without resume and verifies the received bytes. These are local loopback measurements, not Wi-Fi speed guarantees. No per-block acknowledgement or whole-file prehash is added.

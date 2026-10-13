@@ -189,14 +189,17 @@ final class TransferRow: NSView {
     let initialEvent: [String: Any]
     private var progressEvent: [String: Any]?
     private var completionEvent: [String: Any]?
+    private var stateEvent: [String: Any]?
     private var fileEvents: [[String: Any]] = []
-    var replayEvents: [[String: Any]] { fileEvents + [progressEvent, completionEvent].compactMap { $0 } }
+    var replayEvents: [[String: Any]] { fileEvents + [progressEvent, stateEvent, completionEvent].compactMap { $0 } }
     private var fileViews: [TransferFile] = []
     private let total: Double
     private let detail = Style.label("Подготовка…", size: 11, color: Style.muted)
     private let progress = TransferProgress(frame: .zero)
     private let cancel: ActionButton
-    init(event: [String: Any], reveal: @escaping (URL) -> Void, cancelAction: @escaping (String) -> Void) {
+    private let pause = ActionButton("Пауза") {}
+    private var state = "active"
+    init(event: [String: Any], reveal: @escaping (URL) -> Void, cancelAction: @escaping (String) -> Void, controlAction: ((String, String) -> Void)? = nil) {
         initialEvent = event; id = event["transfer"] as? String ?? ""
         total = event["total"] as? Double ?? 0
         let transferID = id
@@ -204,10 +207,12 @@ final class TransferRow: NSView {
         cancel.toolTip = "Отменить передачу"; cancel.setAccessibilityLabel("Отменить передачу")
         cancel.isBordered = false
         super.init(frame: .zero)
+        pause.isBordered = false; pause.isHidden = event["resumable"] as? Bool != true
+        pause.actionHandler = { [weak self] in guard let self = self else { return }; controlAction?(self.id, self.state == "paused" ? "resume" : "pause") }
         wantsLayer = true; layer?.backgroundColor = Style.card.cgColor; layer?.cornerRadius = 5
         let direction = event["direction"] as? String == "send" ? "↑" : "↓"
         let title = Style.label("\(direction) \(event["name"] as? String ?? "Устройство")", size: 11, color: Style.muted)
-        let header = NSStackView(views: [title, NSView(), cancel]); header.spacing = 4
+        let header = NSStackView(views: [title, NSView(), pause, cancel]); header.spacing = 4
         let count = event["display_count"] as? Int ?? event["files"] as? Int ?? 0
         detail.stringValue = "\(count) объектов · \(bytes(total))"
         let entries = event["display_entries"] as? [[String: Any]] ?? event["entries"] as? [[String: Any]] ?? []
@@ -233,6 +238,12 @@ final class TransferRow: NSView {
     }
     func process(_ event: [String: Any]) {
         switch event["type"] as? String {
+        case "state":
+            stateEvent = event; state = event["status"] as? String ?? "active"
+            pause.isHidden = event["resumable"] as? Bool != true
+            pause.title = state == "paused" ? "Продолжить" : "Пауза"
+            if state == "paused" { detail.stringValue = "На паузе · \(bytes(total))" }
+            if state == "waiting" { detail.stringValue = "Ожидание соединения · \(bytes(total))" }
         case "file":
             fileEvents.append(event)
             fileViews.first { $0.path == event["path"] as? String }?.complete(event)
@@ -243,7 +254,7 @@ final class TransferRow: NSView {
             let remaining = min(864000, max(0, event["remaining"] as? Double ?? 0))
             detail.stringValue = "\(bytes(done)) / \(bytes(total))\n\(bytes(event["speed"] as? Double ?? 0))/с · осталось \(Int(remaining)) с"
         case "complete":
-            completionEvent = event; finished = true; cancel.isHidden = true
+            completionEvent = event; finished = true; cancel.isHidden = true; pause.isHidden = true
             switch event["status"] as? String {
             case "done": detail.stringValue = "Готово ✓ · \(bytes(total))"; progress.value = 100
             case "cancelled": detail.stringValue = "Отменено · \(bytes(total))"

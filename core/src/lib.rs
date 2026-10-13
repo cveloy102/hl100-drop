@@ -6,7 +6,7 @@ use std::{
     collections::{HashMap, VecDeque},
     ffi::{CStr, CString},
     fs::{self, File, OpenOptions},
-    io::{self, Read, Write},
+    io::{self, Read, Seek, SeekFrom, Write},
     net::{Ipv4Addr, SocketAddr, TcpListener, TcpStream, UdpSocket},
     os::raw::c_char,
     path::{Component, Path, PathBuf},
@@ -23,6 +23,7 @@ const DISCOVERY_PORT: u16 = 41001;
 const MAX_FRAME: usize = 4 * 1024 * 1024;
 const BUFFER: usize = 1024 * 1024;
 static NEXT_ID: AtomicU64 = AtomicU64::new(1);
+mod resume;
 
 fn retry_interrupted<T>(mut operation: impl FnMut() -> io::Result<T>) -> io::Result<T> {
     loop {
@@ -44,7 +45,7 @@ pub struct Config {
 fn default_port() -> u16 {
     41000
 }
-#[derive(Clone, Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct Entry {
     pub path: String,
     pub size: u64,
@@ -57,6 +58,10 @@ struct Offer {
     name: String,
     transfer: String,
     entries: Vec<Entry>,
+    #[serde(default)]
+    resume: bool,
+    #[serde(default)]
+    action: String,
 }
 #[derive(Clone, Serialize)]
 struct Peer {
@@ -69,7 +74,8 @@ struct Peer {
 pub struct Source {
     pub entry: Entry,
     pub local_path: Option<PathBuf>,
-    pub open: Option<Box<dyn FnOnce() -> io::Result<File> + Send>>,
+    pub locator: Option<Value>,
+    pub open: Option<Box<dyn FnMut() -> io::Result<File> + Send>>,
 }
 
 // UI metadata is separate from the full wire manifest. A tree is one item.
@@ -98,6 +104,33 @@ pub trait Storage: Send + Sync {
     fn local_path(&self, _transfer: &str, _entry: &Entry) -> Option<PathBuf> {
         None
     }
+    fn state_root(&self) -> Option<PathBuf> {
+        None
+    }
+    fn reopen_source(&self, locator: &Value) -> io::Result<File> {
+        let path = locator["path"]
+            .as_str()
+            .ok_or_else(|| io::Error::other("Исходный файл недоступен"))?;
+        let file = File::open(path)?;
+        let meta = file.metadata()?;
+        let stamp = meta
+            .modified()?
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_nanos()
+            .to_string();
+        if locator["modified"].as_str() != Some(&stamp)
+            || locator["size"].as_u64() != Some(meta.len())
+        {
+            return Err(io::Error::other(
+                "Исходный файл изменился. Отправьте его заново",
+            ));
+        }
+        Ok(file)
+    }
+    fn resume_offset(&self, _transfer: &str, _entry: &Entry) -> io::Result<(u64, bool)> {
+        Err(io::Error::other("Хранилище не поддерживает возобновление"))
+    }
 }
 pub struct DiskStorage {
     root: PathBuf,
@@ -105,10 +138,18 @@ pub struct DiskStorage {
 }
 impl DiskStorage {
     pub fn new(folder: impl Into<PathBuf>) -> Self {
+        let root = folder.into();
+        let paths = fs::read(root.join(".drop-state/storage.json"))
+            .ok()
+            .and_then(|data| serde_json::from_slice(&data).ok())
+            .unwrap_or_default();
         Self {
-            root: folder.into(),
-            paths: Mutex::new(HashMap::new()),
+            root,
+            paths: Mutex::new(paths),
         }
+    }
+    fn save_paths(&self, paths: &HashMap<String, (PathBuf, PathBuf)>) -> io::Result<()> {
+        resume::save_json(&self.root.join(".drop-state/storage.json"), paths)
     }
 }
 fn key(transfer: &str, path: &str) -> String {
@@ -134,6 +175,13 @@ impl Storage for DiskStorage {
         fs::create_dir_all(&self.root)?;
         // Resolve one collision-free top-level name for the entire offered tree.
         let mut paths = self.paths.lock().unwrap();
+        if !entry.directory {
+            if let Some((temp, _)) = paths.get(&key(transfer, &entry.path)) {
+                if !temp.as_os_str().is_empty() && temp.exists() {
+                    return Ok(Some(OpenOptions::new().read(true).write(true).open(temp)?));
+                }
+            }
+        }
         let top = relative
             .components()
             .next()
@@ -169,6 +217,7 @@ impl Storage for DiskStorage {
         };
         if entry.directory {
             fs::create_dir_all(target)?;
+            self.save_paths(&paths)?;
             return Ok(None);
         }
         fs::create_dir_all(target.parent().unwrap())?;
@@ -178,10 +227,12 @@ impl Storage for DiskStorage {
             transfer
         ));
         let file = OpenOptions::new()
+            .read(true)
             .write(true)
             .create_new(true)
             .open(&temp)?;
         paths.insert(key(transfer, &entry.path), (temp, target));
+        self.save_paths(&paths)?;
         Ok(Some(file))
     }
     fn local_path(&self, transfer: &str, entry: &Entry) -> Option<PathBuf> {
@@ -204,7 +255,10 @@ impl Storage for DiskStorage {
         if let Some((temp, target)) = paths.get(&key(transfer, &entry.path)) {
             fs::rename(temp, target)?;
         }
-        paths.remove(&key(transfer, &entry.path));
+        if let Some((temp, _)) = paths.get_mut(&key(transfer, &entry.path)) {
+            *temp = PathBuf::new();
+        }
+        self.save_paths(&paths)?;
         Ok(())
     }
     fn abort(&self, transfer: &str) {
@@ -220,6 +274,32 @@ impl Storage for DiskStorage {
                 true
             }
         });
+        let _ = self.save_paths(&paths);
+    }
+    fn state_root(&self) -> Option<PathBuf> {
+        Some(self.root.join(".drop-state"))
+    }
+    fn resume_offset(&self, transfer: &str, entry: &Entry) -> io::Result<(u64, bool)> {
+        if entry.directory {
+            return Ok((0, false));
+        }
+        let paths = self.paths.lock().unwrap();
+        if let Some((temp, target)) = paths.get(&key(transfer, &entry.path)) {
+            if temp.as_os_str().is_empty() || (!temp.exists() && target.exists()) {
+                if fs::metadata(target)?.len() != entry.size {
+                    return Err(io::Error::other("Полученный файл изменился"));
+                }
+                return Ok((entry.size, true));
+            }
+            if temp.exists() {
+                let length = fs::metadata(temp)?.len();
+                if length > entry.size {
+                    return Err(io::Error::other("Повреждён незавершённый файл"));
+                }
+                return Ok((length, false));
+            }
+        }
+        Ok((0, false))
     }
 }
 
@@ -233,6 +313,8 @@ pub struct Engine {
     workers: Mutex<Vec<thread::JoinHandle<()>>>,
     listener_worker: Mutex<Option<thread::JoinHandle<()>>>,
     listener_port: u16,
+    resumed: Mutex<HashMap<String, Arc<resume::Control>>>,
+    resume_workers: Mutex<Vec<thread::JoinHandle<()>>>,
 }
 fn frame_write(stream: &mut TcpStream, value: &impl Serialize) -> io::Result<()> {
     let bytes = serde_json::to_vec(value)?;
@@ -299,6 +381,8 @@ impl Engine {
             workers: Mutex::new(Vec::new()),
             listener_worker: Mutex::new(None),
             listener_port: port,
+            resumed: Mutex::new(HashMap::new()),
+            resume_workers: Mutex::new(Vec::new()),
         });
         let worker = e.clone();
         let handle = thread::spawn(move || {
@@ -350,6 +434,7 @@ impl Engine {
             }
         });
         e.event(json!({"type":"started","port":port}));
+        e.restore_transfers();
         Ok(e)
     }
     fn spawn(&self, f: impl FnOnce() + Send + 'static) {
@@ -359,6 +444,9 @@ impl Engine {
     }
     pub fn stop(&self) {
         self.stopped.store(true, Ordering::Relaxed);
+        for control in self.resumed.lock().unwrap().values() {
+            control.disconnect();
+        }
         for c in self.transfers.lock().unwrap().values() {
             c.store(true, Ordering::Relaxed);
         }
@@ -366,11 +454,32 @@ impl Engine {
         if let Some(listener) = self.listener_worker.lock().unwrap().take() {
             let _ = listener.join();
         }
+        for worker in std::mem::take(&mut *self.resume_workers.lock().unwrap()) {
+            let _ = worker.join();
+        }
+        while self
+            .resumed
+            .lock()
+            .unwrap()
+            .values()
+            .any(|c| c.active.load(Ordering::Relaxed))
+        {
+            thread::sleep(Duration::from_millis(10));
+        }
     }
     pub fn busy(&self) -> bool {
         !self.transfers.lock().unwrap().is_empty()
+            || self
+                .resumed
+                .lock()
+                .unwrap()
+                .values()
+                .any(|c| c.active.load(Ordering::Relaxed))
     }
     pub fn cancel(&self, id: &str) {
+        if self.control_transfer(id, "cancel").is_ok() {
+            return;
+        }
         if let Some(c) = self.transfers.lock().unwrap().get(id) {
             c.store(true, Ordering::Relaxed);
         }
@@ -415,7 +524,7 @@ impl Engine {
             if announced.elapsed() >= Duration::from_secs(2) {
                 let c = self.config.lock().unwrap().clone();
                 let data = serde_json::to_vec(
-                    &json!({"app":"hl100-drop","protocol":1,"id":c.id,"name":c.name,"port":self.listener_port,"platform":std::env::consts::OS}),
+                    &json!({"app":"hl100-drop","protocol":1,"resume":true,"id":c.id,"name":c.name,"port":self.listener_port,"platform":std::env::consts::OS}),
                 )?;
                 let _ = socket.send_to(&data, (GROUP, DISCOVERY_PORT));
                 for iface in &interfaces {
@@ -484,6 +593,9 @@ impl Engine {
             return Err(io::Error::other("Выберите файлы"));
         }
         validate_entries(&sources.iter().map(|s| s.entry.clone()).collect::<Vec<_>>())?;
+        if sources.iter().all(|s| s.locator.is_some()) && self.storage.state_root().is_some() {
+            return self.send_resumable(addr, name, sources);
+        }
         let id = format!(
             "{}-{}",
             self.config.lock().unwrap().id,
@@ -511,7 +623,7 @@ impl Engine {
             let result = (|| -> io::Result<()> {
                 let mut stream = TcpStream::connect_timeout(&addr, Duration::from_secs(5))?; setup_stream(&stream)?;
                 let c = w.config.lock().unwrap().clone();
-                frame_write(&mut stream, &Offer { protocol:1,id:c.id,name:c.name,transfer:transfer.clone(),entries:sources.iter().map(|s|s.entry.clone()).collect() })?;
+                frame_write(&mut stream, &Offer { protocol:1,id:c.id,name:c.name,transfer:transfer.clone(),entries:sources.iter().map(|s|s.entry.clone()).collect(), resume:false, action:String::new() })?;
                 let reply: Value = frame_read(&mut stream)?;
                 if reply["ok"] != true { return Err(io::Error::other(reply["error"].as_str().unwrap_or("Получатель отказал"))); }
                 let mut done=0; let started=Instant::now(); let mut update=Instant::now(); let mut buffer=vec![0;BUFFER];
@@ -543,6 +655,10 @@ impl Engine {
                 return Err(io::Error::other("Неподдерживаемая передача"));
             }
             validate_entries(&offer.entries)?;
+            if offer.resume && self.storage.state_root().is_some() {
+                self.receive_resumable(stream.try_clone()?, offer)?;
+                return Ok((String::new(), Vec::new()));
+            }
             let total = offer
                 .entries
                 .iter()
@@ -670,6 +786,7 @@ pub fn collect_paths(paths: &[String]) -> io::Result<Vec<Source>> {
         let source_path = path.to_path_buf();
         out.push(Source {
             local_path: Some(fs::canonicalize(path)?),
+            locator: Some(json!({"path":fs::canonicalize(path)?,"size":meta.len(),"modified":meta.modified()?.duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_nanos().to_string()})),
             entry: Entry {
                 path: relative.clone(),
                 size: if directory { 0 } else { meta.len() },
@@ -678,12 +795,15 @@ pub fn collect_paths(paths: &[String]) -> io::Result<Vec<Source>> {
             open: if directory {
                 None
             } else {
-                Some(Box::new(move || File::open(source_path)))
+                Some(Box::new(move || File::open(&source_path)))
             },
         });
         if directory {
             for item in fs::read_dir(path)? {
                 let item = item?;
+                if item.file_name() == ".drop-state" {
+                    continue;
+                }
                 walk(
                     &item.path(),
                     format!("{relative}/{}", item.file_name().to_string_lossy()),
@@ -743,6 +863,10 @@ pub fn dispatch(command: &str) -> Value {
                     "poll" => Ok(e.poll()),
                     "cancel" => {
                         e.cancel(v["transfer"].as_str().unwrap_or(""));
+                        Ok(json!({"ok":true}))
+                    }
+                    "pause" | "resume" => {
+                        e.control_transfer(v["transfer"].as_str().unwrap_or(""), op)?;
                         Ok(json!({"ok":true}))
                     }
                     "send" => {
@@ -881,6 +1005,8 @@ mod tests {
                 &mut stream,
                 &Offer {
                     protocol: 1,
+                    resume: false,
+                    action: String::new(),
                     id: "test".into(),
                     name: "Test".into(),
                     transfer: format!("restart-{n}"),
@@ -984,6 +1110,8 @@ mod tests {
             &mut stream,
             &Offer {
                 protocol: 1,
+                resume: false,
+                action: String::new(),
                 id: "test".into(),
                 name: "Test".into(),
                 transfer: "delayed".into(),
@@ -1028,6 +1156,8 @@ mod tests {
             &mut stream,
             &Offer {
                 protocol: 1,
+                resume: false,
+                action: String::new(),
                 id: "test".into(),
                 name: "Test".into(),
                 transfer: "test".into(),
@@ -1058,7 +1188,13 @@ mod tests {
             thread::sleep(Duration::from_millis(20));
         }
         assert!(completed);
-        assert_eq!(fs::read_dir(&root).unwrap().count(), 0);
+        assert_eq!(
+            fs::read_dir(&root)
+                .unwrap()
+                .filter(|e| e.as_ref().unwrap().file_name() != ".drop-state")
+                .count(),
+            0
+        );
         receiver.stop();
         thread::sleep(Duration::from_millis(300));
         fs::remove_dir_all(root).unwrap();
@@ -1094,6 +1230,7 @@ mod tests {
         let (release_tx, release_rx) = std::sync::mpsc::channel();
         let sources = vec![Source {
             local_path: None,
+            locator: None,
             entry: Entry {
                 path: "cancelled.bin".into(),
                 size: 10000,
@@ -1102,7 +1239,7 @@ mod tests {
             open: Some(Box::new(move || {
                 entered_tx.send(()).unwrap();
                 release_rx.recv().unwrap();
-                File::open(source)
+                File::open(&source)
             })),
         }];
         let id = sender
@@ -1128,7 +1265,13 @@ mod tests {
             .any(|e| e["status"] == "cancelled"));
         assert!(!dest.join("cancelled.bin").exists());
         if dest.exists() {
-            assert_eq!(fs::read_dir(&dest).unwrap().count(), 0);
+            assert_eq!(
+                fs::read_dir(&dest)
+                    .unwrap()
+                    .filter(|e| e.as_ref().unwrap().file_name() != ".drop-state")
+                    .count(),
+                0
+            );
         }
         sender.stop();
         receiver.stop();

@@ -15,7 +15,7 @@ public partial class MainWindow : Window {
     private Settings settings=Settings.Load();
     private readonly DispatcherTimer timer=new() { Interval=TimeSpan.FromMilliseconds(200) };
     private sealed class TransferRow {
-        public ProgressBar Bar=new(); public TextBlock Text=new(); public Button Cancel=new();
+        public ProgressBar Bar=new(); public TextBlock Text=new(); public Button Cancel=new(); public Button Pause=new(); public string State="active";
         public long Total; public bool Receiving; public string FirstName=""; public int Count;
         public string? SavedPath; public Dictionary<string,Button> Files=new();
     }
@@ -95,6 +95,8 @@ public partial class MainWindow : Window {
             var createdRow=new TransferRow{Total=e.GetProperty("total").GetInt64(),Receiving=e.GetProperty("direction").GetString()=="receive",Count=e.TryGetProperty("display_count",out var count)?count.GetInt32():e.GetProperty("files").GetInt32()};
             createdRow.Text=new TextBlock{Text=$"{createdRow.Count} объектов / {Bytes(createdRow.Total)}",Foreground=(Brush)FindResource("Muted"),Margin=new Thickness(0,8,0,12),TextWrapping=TextWrapping.Wrap};
             createdRow.Cancel=new Button{Content="ОТМЕНИТЬ",Background=Brushes.Transparent,Foreground=(Brush)FindResource("Muted"),HorizontalAlignment=HorizontalAlignment.Left};createdRow.Cancel.Click+=async(_,_)=>await Task.Run(()=>Native.Call(new{op="cancel",transfer=id}));
+            createdRow.Pause=new Button{Content="ПАУЗА",IsEnabled=e.TryGetProperty("resumable",out var canResume)&&canResume.GetBoolean(),Background=Brushes.Transparent,HorizontalAlignment=HorizontalAlignment.Left,Margin=new Thickness(0,8,0,8)};
+            createdRow.Pause.Click+=async(_,_)=>{try{var result=await Task.Run(()=>Native.Call(new{op=createdRow.State=="paused"?"resume":"pause",transfer=id}));Native.Check(result);}catch(Exception error){Status.Text=error.Message;}};
             if(e.TryGetProperty("display_entries",out var entries)||e.TryGetProperty("entries",out entries)){foreach(var entry in entries.EnumerateArray()){
                 var path=entry.GetProperty("path").GetString()!;if(createdRow.FirstName.Length==0)createdRow.FirstName=path;
                 var label=path+" / "+(entry.GetProperty("directory").GetBoolean()?"ПАПКА · ":"")+Bytes(entry.GetProperty("size").GetDouble());
@@ -102,14 +104,15 @@ public partial class MainWindow : Window {
                 if(entry.TryGetProperty("local_path",out var source)&&source.ValueKind==JsonValueKind.String){var sourcePath=source.GetString()!;fileButton.IsEnabled=true;fileButton.ToolTip="Показать в папке: "+sourcePath;fileButton.Click+=(_,_)=>Reveal(sourcePath);}
                 createdRow.Files[path]=fileButton;stack.Children.Add(fileButton);
             }if(createdRow.Count>createdRow.Files.Count)stack.Children.Add(new TextBlock{Text=$"Ещё {createdRow.Count-createdRow.Files.Count} объектов",Foreground=(Brush)FindResource("Muted")});}
-            stack.Children.Add(createdRow.Text);stack.Children.Add(createdRow.Bar);stack.Children.Add(createdRow.Cancel);TransferList.Children.Insert(0,stack);transfers[id]=createdRow;
+            stack.Children.Add(createdRow.Text);stack.Children.Add(createdRow.Bar);stack.Children.Add(createdRow.Pause);stack.Children.Add(createdRow.Cancel);TransferList.Children.Insert(0,stack);transfers[id]=createdRow;
             // Keep the UI bounded during long sessions; active transfers are retained.
             TrimHistory();
         }
         if(!transfers.TryGetValue(id,out var row))return;
+        if(type=="state"){row.State=e.GetProperty("status").GetString()!;row.Pause.IsEnabled=e.TryGetProperty("resumable",out var supported)&&supported.GetBoolean();row.Pause.Content=row.State=="paused"?"ПРОДОЛЖИТЬ":"ПАУЗА";if(row.State=="paused")row.Text.Text="На паузе / "+Bytes(row.Total);else if(row.State=="waiting")row.Text.Text="Ожидание соединения / "+Bytes(row.Total);}
         if(type=="file"&&e.TryGetProperty("local_path",out var saved)&&saved.ValueKind==JsonValueKind.String){var path=saved.GetString()!;row.SavedPath??=path;if(row.Files.TryGetValue(e.GetProperty("path").GetString()!,out var button)){button.IsEnabled=true;button.ToolTip="Показать в папке: "+path;button.Click+=(_,_)=>Reveal(path);}}
         if(type=="progress"){var done=e.GetProperty("done").GetDouble();var total=e.GetProperty("total").GetDouble();row.Bar.Value=total>0?done/total*100:100;row.Text.Text=$"{Bytes(done)} / {Bytes(total)}\n{Bytes(e.GetProperty("speed").GetDouble())}/с · осталось {TimeSpan.FromSeconds(Math.Min(e.GetProperty("remaining").GetDouble(),864000)):hh\\:mm\\:ss}";}
-        if(type=="complete"){var status=e.GetProperty("status").GetString();row.Text.Text=(status=="done"?"Готово ✓":status=="cancelled"?"Отменено":"Ошибка: "+e.GetProperty("message").GetString())+" / "+Bytes(row.Total);row.Cancel.Visibility=Visibility.Collapsed;if(status=="done"){row.Bar.Value=100;Status.Text="Передача завершена";if(row.Receiving&&settings.Notifications){toast?.Close();var savedPath=row.SavedPath??settings.Folder;toast=new ReceiveToast(row.FirstName.Length>0?row.FirstName:"Файлы получены",$"{row.Count} объектов / {Bytes(row.Total)}",()=>Reveal(savedPath));toast.Show();}}transfers.Remove(id);TrimHistory();}
+        if(type=="complete"){var status=e.GetProperty("status").GetString();row.Text.Text=(status=="done"?"Готово ✓":status=="cancelled"?"Отменено":"Ошибка: "+e.GetProperty("message").GetString())+" / "+Bytes(row.Total);row.Cancel.Visibility=Visibility.Collapsed;row.Pause.Visibility=Visibility.Collapsed;if(status=="done"){row.Bar.Value=100;Status.Text="Передача завершена";if(row.Receiving&&settings.Notifications){toast?.Close();var savedPath=row.SavedPath??settings.Folder;toast=new ReceiveToast(row.FirstName.Length>0?row.FirstName:"Файлы получены",$"{row.Count} объектов / {Bytes(row.Total)}",()=>Reveal(savedPath));toast.Show();}}transfers.Remove(id);TrimHistory();}
     }
     private void TrimHistory(){while(TransferList.Children.Count>100){var old=TransferList.Children.OfType<StackPanel>().LastOrDefault(s=>s.Tag is string id&&!transfers.ContainsKey(id));if(old==null)break;TransferList.Children.Remove(old);}}
     private static string Bytes(double n){string[] units={"Б","КБ","МБ","ГБ","ТБ"};int i=0;while(n>=1024&&i<units.Length-1){n/=1024;i++;}return $"{n:0.#} {units[i]}";}

@@ -68,7 +68,7 @@ class TransferService:Service() {
         val prefs=DropState.preferences(this)
         val enabled=prefs.getBoolean("background",false)
         val minutes=prefs.getInt("backgroundMinutes",15).coerceAtLeast(0)
-        val active=pending>0||DropState.busy
+        val active=pending>0||DropState.busy||DropState.transfers.any{it.status=="waiting"}
         val mode=session.update(visible,enabled,minutes,active,SystemClock.elapsedRealtime())
         DropState.backgroundUntil=session.deadline
         if(mode==BackgroundSession.Mode.BACKGROUND){

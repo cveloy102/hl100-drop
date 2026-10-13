@@ -17,7 +17,7 @@ Default TCP port: 41000. Control frame: 4-byte unsigned big-endian JSON byte len
 
 Receiver uses a local transfer ID, preserves existing files, reserves a collision-free top-level name, writes partial files and renames each finished file. On failure, completed files remain and unfinished partial files are removed. Empty directories are preserved. Invalid relative paths are rejected to prevent writes outside the chosen receive directory. Symbolic links are not sent.
 
-Streaming buffer: 1 MiB. Progress events no more often than every 150 ms. Cancellation stops the next read/write iteration; a blocked network operation has a 15-second timeout. Resume is not implemented in v1; retry starts a new transfer.
+Streaming buffer: 1 MiB. Progress events no more often than every 150 ms. Cancellation stops the next read/write iteration; a blocked network operation has a 15-second timeout. Legacy v1 retries start a new transfer. Version 1.1 optionally negotiates persistent resumption as described below.
 
 ## C ABI
 
@@ -51,3 +51,15 @@ partial-file record, and publish it only after a successful finalization.
 These fields and events are local C ABI/JNI additions. Network protocol v1 and
 ACKs are unchanged; existing Windows/Android clients ignore unknown event types
 and additional fields. The updated macOS app can transfer to older clients.
+
+## Optional resume extension (DROP 1.1)
+
+Discovery may include `resume:true`. A new sender offers protocol 1 plus `resume:true`, a stable safe ASCII transfer ID and an optional `action:"cancel"`. An old receiver ignores these fields and replies `{ok:true}`; the sender falls back to normal v1 with no pause support. A capable receiver replies `{ok:true,resume:true,id,offsets:[[writtenBytes,finished],...]}` in manifest order. The receiver owns these offsets: they come from actual partial-file lengths and finalized files, not the sender progress counter.
+
+Each unfinished non-directory file sends `size-writtenBytes` raw bytes and receives the normal per-file ACK. A finalized file sends no bytes and no per-file ACK. The final batch ACK is unchanged. Control frames are never inserted into the raw byte stream. Pause closes the socket; a subsequent offer negotiates offsets again. Replies `status:"paused"` or `status:"busy"` defer retry; `status:"cancelled"` terminates it. A stable device ID prevents resuming into a different receiver after address reassignment.
+
+The receiver validates the stable sender ID and the complete manifest against its local journal. It preserves partial files on transport interruption, persists manual pause and collision-resolved roots, and skips completed files. Source sizes and modification times are checked before reopening. Native and Android journals survive application exit. Cancellation removes unfinished partial files and leaves finalized files intact. If the peer is offline, sender cancellation is queued until it can reach the receiver.
+
+New local commands: `{op:"pause",transfer}` and `{op:"resume",transfer}`. A `state` event supplies `status` (`active`, `waiting`, `paused`) and `resumable`. `busy` describes active I/O; manual pause does not prevent exiting or updating the application. `display_entries` and `display_count` describe top-level UI items, with aggregate folder sizes, separately from the complete wire manifest.
+
+Persistent state is flushed at file and state boundaries; there is no per-block fsync, block ACK, compression or prehash. Ordinary application/process restarts are supported. This is not a transactional durability guarantee against sudden power loss or arbitrary external modification of partial files.

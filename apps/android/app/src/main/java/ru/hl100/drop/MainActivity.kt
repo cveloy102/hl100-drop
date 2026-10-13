@@ -89,9 +89,12 @@ class MainActivity:ComponentActivity() {
                                 Text("${if(t.direction=="send")"↑" else "↓"} ${t.name}",fontSize=18.sp)
                                 t.files.forEach{file->Text("${file.path} / ${if(file.directory)"ПАПКА · ${bytes(file.size.toDouble())}" else bytes(file.size.toDouble())}",fontSize=13.sp,color=Paper,modifier=Modifier.padding(top=8.dp))};if(t.count>t.files.size)Text("Ещё ${t.count-t.files.size} объектов",color=Muted)
                                 if(t.status!="active")Text(bytes(t.total.toDouble()),color=Muted,fontSize=12.sp)
-                                Text(when(t.status){"done"->"Готово ✓";"cancelled"->"Отменено";"error"->"Ошибка: ${t.message}";else->"${bytes(t.done.toDouble())} / ${bytes(t.total.toDouble())}\n${bytes(t.speed)}/с"},color=Muted,modifier=Modifier.padding(vertical=8.dp))
+                                Text(when(t.status){"done"->"Готово ✓";"cancelled"->"Отменено";"paused"->"На паузе";"waiting"->"Ожидание соединения";"error"->"Ошибка: ${t.message}";else->"${bytes(t.done.toDouble())} / ${bytes(t.total.toDouble())}\n${bytes(t.speed)}/с"},color=Muted,modifier=Modifier.padding(vertical=8.dp))
                                 LinearProgressIndicator(progress={if(t.status=="done")1f else if(t.total>0)(t.done.toDouble()/t.total).toFloat() else 0f},modifier=Modifier.fillMaxWidth(),color=Red,trackColor=Color(0xFF30302D))
-                                if(t.status=="active")TextButton(onClick={lifecycleScope.launch{DropState.cancel(t.id)}}){Text("ОТМЕНИТЬ")}
+                                if(t.status in listOf("active","waiting","paused"))Row{
+                                    if(t.resumable)TextButton(onClick={lifecycleScope.launch{DropState.control(t.id,if(t.status=="paused")"resume" else "pause")}}){Text(if(t.status=="paused")"ПРОДОЛЖИТЬ" else "ПАУЗА")}
+                                    TextButton(onClick={lifecycleScope.launch{DropState.cancel(t.id)}}){Text("ОТМЕНИТЬ")}
+                                }
                             } }
                         }
                         HorizontalDivider(Modifier.padding(top=28.dp,bottom=16.dp),color=Color(0xFF30302D));Text("V ${BuildConfig.VERSION_NAME} / ANDROID\nDIRECT TRANSMISSION / LOCAL NETWORK",color=Muted,fontSize=10.sp,fontFamily=FontFamily.Monospace)

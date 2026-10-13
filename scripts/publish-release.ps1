@@ -1,4 +1,4 @@
-param([string]$Version = '1.0.1', [switch]$Stable)
+param([string]$Version = '1.1.0', [switch]$Stable)
 . "$PSScriptRoot/environment.ps1"
 $taskRepo = 'cveloy102/hl100-drop'
 $taskFiles = @("HL100DropSetup-$Version.exe", "HL100Drop-$Version.apk")
