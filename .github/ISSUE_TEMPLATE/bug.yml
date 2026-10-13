@@ -1,0 +1,23 @@
+name: Ошибка
+description: Что-то работает неправильно
+labels: [bug]
+body:
+  - type: input
+    id: version
+    attributes:
+      label: Версии DROP и ОС на обоих устройствах
+      placeholder: Windows 11 / DROP 1.1.1 → Android 16 / DROP 1.1.1
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Шаги и результат
+      description: Как повторить, что ожидалось и что произошло. Приложите полный текст ошибки и скриншот без личных данных.
+    validations:
+      required: true
+  - type: textarea
+    id: network
+    attributes:
+      label: Сеть и обстоятельства
+      description: Wi-Fi / кабель, фон, обрыв, папка или файл, размер. Не прикладывайте личные файлы.

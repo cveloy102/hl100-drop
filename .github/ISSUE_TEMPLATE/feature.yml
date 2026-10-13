@@ -1,0 +1,10 @@
+name: Предложение
+description: Улучшение DROP
+body:
+  - type: textarea
+    id: scenario
+    attributes:
+      label: Что хочется сделать
+      description: Опишите свой сценарий и ожидаемое поведение.
+    validations:
+      required: true

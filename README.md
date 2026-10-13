@@ -1,73 +1,91 @@
-# HL100 Drop
+<div align="center">
 
-Native file sharing over a local network. Windows 10+, Android 12+, macOS 12+ Intel/Apple Silicon. Windows uses WPF, Android uses Jetpack Compose, macOS uses Swift/AppKit; all use the same Rust engine.
+<img src="docs/images/drop-mark.svg" width="76" alt="DROP">
 
-## Layout
+# DROP
 
-- `core`: discovery, TCP streaming, file manifest, progress, pause/resume, durable transfer journals, C ABI/JNI.
-- `apps/windows`: native desktop UI, drag-and-drop, tray, settings, GitHub updater.
-- `apps/android`: native phone UI, SAF storage, receive service, GitHub updater.
-- `installer/windows`: Inno Setup per-user installer.
-- `apps/macos`: native AppKit desktop UI, drag-and-drop, menu bar, settings and verified DMG updates.
-- `docs`: agreed requirements and protocol.
+### Файлы рядом. Без проводов.
 
-## Windows build
+Нативный файлообменник для Windows, Android и Mac.
+Одна локальная сеть. Выбранное устройство. Прямой обмен файлами и папками.
 
-Install Rust (MSVC + Visual Studio Build Tools, or GNU + GCC MinGW), .NET 8 SDK or newer and Inno Setup 6. Run:
+[![Windows](https://img.shields.io/badge/Windows-10%2B-222222?logo=windows&logoColor=white)](docs/usage.md#установка-на-windows)
+[![Android](https://img.shields.io/badge/Android-12%2B-222222?logo=android&logoColor=white)](docs/usage.md#установка-на-android)
+[![macOS](https://img.shields.io/badge/macOS-12%2B-222222?logo=apple&logoColor=white)](docs/usage.md#установка-на-macos)
+[![Release](https://img.shields.io/github/v/release/cveloy102/hl100-drop?color=ef3f3b&label=версия)](https://github.com/cveloy102/hl100-drop/releases/latest)
+[![Build](https://github.com/cveloy102/hl100-drop/actions/workflows/checks.yml/badge.svg)](https://github.com/cveloy102/hl100-drop/actions/workflows/checks.yml)
 
-```powershell
-./scripts/build-windows.ps1
-```
+**[Сайт DROP](https://cveloy102.github.io/hl100-drop/)** · **[Скачать](https://github.com/cveloy102/hl100-drop/releases/latest)** · **[Инструкция](docs/usage.md)** · **[Что нового](CHANGELOG.md)** · **[Сообщить об ошибке](https://github.com/cveloy102/hl100-drop/issues/new/choose)**
 
-Output: `artifacts/HL100DropSetup-1.1.0.exe`. The published app includes its .NET runtime. Installation requires no administrator rights. The first connection may require the standard Windows Firewall prompt to allow local-network access.
+![Главный экран DROP на Windows](docs/images/windows-main.png)
 
-## Android build
+*Настоящий интерфейс Windows 1.1.0, демонстрационные имя и файл. Название устройства задаёт пользователь; оно не определяет платформу. Скриншоты документации: 14 октября 2026 года.*
 
-Install JDK, Android SDK 37, NDK r27d or newer, Rust targets `aarch64-linux-android` and `x86_64-linux-android`. Set `JAVA_HOME`, `ANDROID_HOME`, `ANDROID_NDK_HOME`, then:
+</div>
 
-```powershell
-./scripts/build-android.ps1
-```
+## От выбора устройства до готового файла
 
-This makes a debug APK for device testing. Production APKs require a permanent signing key; set `HL100_KEYSTORE`, `HL100_STORE_PASSWORD`, `HL100_KEY_ALIAS`, `HL100_KEY_PASSWORD`, then run with `-Release`. Keep the key out of Git and preserve it for future updates.
+DROP обнаруживает другие устройства в той же локальной сети. Выберите получателя и отправьте файлы: приём происходит автоматически в выбранную папку. На компьютере можно перетащить файлы или папку прямо на карточку устройства.
 
-For a local signing key, run `scripts/initialize-signing.ps1` once. It saves the key and configuration in `private/` (excluded from Git). Back up both files privately. `build-android.ps1 -Release` reads this configuration automatically. Copy the resulting APK to `artifacts/HL100Drop-1.1.0.apk` before publishing.
+| Возможность | Как работает |
+| --- | --- |
+| Файлы и папки | Вложенные и пустые папки, кириллица, сохранение структуры |
+| Прямой обмен | Данные идут между устройствами по TCP, без облачного посредника |
+| Пауза и продолжение | Управление на отправителе и получателе, начиная с 1.1 |
+| Докачка | Автоматически после обрыва связи; сохраняется после выхода из приложений |
+| Понятная история | Имя, размер, скорость и прогресс; папка отображается одним объектом |
+| Открытие полученного | Нажатие на готовый файл или папку выделяет объект в Проводнике / Finder |
+| Поделиться на Android | Галерея или другое приложение → «Поделиться» → DROP → устройство |
+| Работа в фоне | Windows — трей, Mac — строка меню; Android — настраиваемый приём в фоне |
+| Обновления | Проверка в настройках, плашка новой версии, загрузка по вашему действию |
 
-## Core verification
+## Начало работы
 
-```text
-cargo test --workspace --locked
-cargo fmt --all --check
-```
+1. [Скачайте последний релиз](https://github.com/cveloy102/hl100-drop/releases/latest) для своих устройств.
+2. При первом запуске задайте **имя** и **папку приёма**.
+3. Подключите устройства к одной Wi-Fi / локальной сети и откройте DROP на обоих.
+4. Выберите устройство и отправьте файлы. Получателю не нужно подтверждать каждую передачу.
 
-Tests include a real loopback TCP transfer of a multi-megabyte binary with nested and empty folders, Unicode names and collision preservation. Real Windows/Android LAN validation and UI testing remain required before a stable release.
+**Windows 10+ x64 · Android 12+ ARM64 / x86_64 · macOS 12+ Intel и Apple Silicon.** Для обмена интернет не нужен. Интернет используется для проверки и скачивания обновлений.
 
-Tests also verify automatic reconnect from receiver offsets, sender/receiver restart, persistent manual pause, completed-file skipping, legacy fallback, cancellation and collision preservation. Legacy disconnects remove partial files; negotiated resume retains them. `scripts/smoke-ffi.ps1` sends a generated file through the DLL's C ABI to a running receiver. The `peer` Rust example is an optional local QA node; it exits after two minutes.
+[Установка, фон, папки и докачка — пошагово →](docs/usage.md)
 
-## Updates
+## Пауза без нового старта
 
-Repository: https://github.com/cveloy102/hl100-drop. Checks use the latest stable GitHub Release, download only on user action and validate SHA-256 before launching an installer. File exchange requires no internet.
+Под полосой прогресса нажмите **«Пауза»**, затем **«Продолжить»**. При потере связи DROP ждёт возвращения устройства и продолжает с записанного места. После выхода из приложений незавершённая передача восстанавливается; ручная пауза остаётся паузой.
 
-`scripts/publish-release.ps1` publishes built assets and SHA-256 checksums using the existing Git Credential Manager login. Releases are marked as prereleases by default; use `-Stable` only after device validation. Prereleases are available for manual download but do not trigger production update banners. Before a new version, increment the Rust package version, Windows project version and Android versionName/versionCode together.
+Исходный файл должен оставаться доступным и неизменённым. Для докачки обновите обе стороны до 1.1 или новее. Старые клиенты продолжают обычный обмен. [Подробности и ограничения Android →](docs/usage.md#пауза-и-докачка)
 
-## macOS build
+## Нативно на каждой платформе
 
-Install Apple's Command Line Tools and Rust via rustup, then:
+Windows использует WPF, Android — Jetpack Compose, Mac — AppKit. Общее ядро на Rust отвечает за обнаружение, TCP-поток и восстановление передач. Данные не сжимаются и не хешируются целиком перед отправкой; докачка не добавляет подтверждение на каждый блок. Скорость зависит от сети, накопителей и устройства; обещаний конкретных МБ/с нет.
 
-```sh
-./scripts/build-macos.sh
-./scripts/test-macos.sh
-```
+![Настройки DROP на Windows](docs/images/windows-settings.png)
 
-Output: `artifacts/HL100Drop-1.1.0-universal.dmg`. Drag the application to Applications.
-Both the app and Rust dylib include Intel and ARM slices. Default builds use ad-hoc
-signing for development; public distribution requires Developer ID signing and
-notarization. See `apps/macos/README.md` for usage, release signing and validation.
+*Имя, папка, автозапуск, уведомления и обновления в том же окне. Изолированные демонстрационные настройки.*
 
-## Pause and resume (1.1+)
+## На телефоне — отправка из галереи и файлов
 
-Both peers negotiate resume through optional fields in the existing protocol. Older peers still receive ordinary transfers; pause is available only after resume negotiation. A manually paused transfer stays paused. Interrupted transfers retry automatically; unfinished transfers are restored after restarting the application. The source must still exist and retain its size and modification time.
+<img src="docs/images/android-main.png" width="300" alt="Главный экран DROP на Android">
 
-Native storage keeps internal journals in `.drop-state` under the receive directory. This directory is excluded when sending a directory. Android keeps journals in private app storage and writes directly to seekable SAF `rw` descriptors. Local storage supports resumption; a pipe or a revoked temporary share URI can require selecting and sending the source again.
+*Настоящий DROP 1.1.0 на POCO F7 / Android 16, 14 октября 2026 года.*
 
-`cargo run --release --example throughput -- artifacts/qa/throughput` compares raw TCP throughput with/without resume and verifies the received bytes. These are local loopback measurements, not Wi-Fi speed guarantees. No per-block acknowledgement or whole-file prehash is added.
+## На Mac — в строке меню
+
+<table><tr><td><img src="docs/images/macos-main.png" width="360" alt="Панель DROP на Mac"></td><td><img src="docs/images/macos-settings.png" width="360" alt="Настройки DROP на Mac"></td></tr></table>
+
+*Настоящие AppKit views версии 1.1.1 с демонстрационными данными. Изображения получены в GitHub Actions, а не на пользовательском Mac.*
+
+## Обновление из приложения
+
+В **настройках** нажмите **«Проверить обновления»**, затем **«Обновиться»**. Windows запустит установщик, Android запросит установку APK, Mac откроет DMG: закройте DROP и замените приложение в «Программах». Не удаляйте приложение перед обновлением.
+
+Для проверки доступен переход **1.1.0 → 1.1.1**. APK подписан тем же постоянным ключом; приложения проверяют SHA-256 загрузки. [Сценарий проверки обновления →](docs/updates.md)
+
+## Помощь и документация
+
+[Использование и FAQ](docs/usage.md) · [Обновления](docs/updates.md) · [История версий](CHANGELOG.md) · [Сборка и выпуск](docs/DEVELOPMENT.md) · [Результаты проверок](docs/validation.md)
+
+DROP рассчитан на доверенную локальную сеть: авторизации и шифрования передачи нет, приём автоматический. macOS-сборки имеют ad hoc подпись без нотариализации Apple. Проверки минимальных версий ОС и конкретных сетей перечислены отдельно в [результатах проверок](docs/validation.md).
+
+Дизайн: чёрный фон, тёплый белый, красный акцент и моноширинный текст в стиле [HL100](https://tg.hl100.ru). **HL100_ / DROP**

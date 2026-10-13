@@ -1,0 +1,5 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Инструкция и частые вопросы
+    url: https://github.com/cveloy102/hl100-drop/blob/codex/initial-implementation/docs/usage.md
+    about: Установка, фон, папки, пауза и обновления

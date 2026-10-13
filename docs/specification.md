@@ -1,27 +1,25 @@
-# HL100 Drop — agreed requirements
+# Согласованные требования DROP
 
-- Native Windows 10+ (C#/WPF), Android 12+ (Kotlin/Compose), macOS 12+ Intel + Apple Silicon (Swift/AppKit).
-- Shared Rust transfer/discovery engine, OS-specific storage and UI.
-- macOS compact menu-bar panel: outside-click dismissal, persistent Pin toggle,
-  settings in an overflow menu; separate resizable transfer-history window.
-- macOS received items show filenames and sizes, retain size after completion,
-  and reveal the actual saved file/folder selected in Finder from either view.
-- Files and folders; recipient selected explicitly, automatic receive with no confirmation.
-- First-run setup: device name and receive folder; both editable in settings.
-- Desktop drag-and-drop to a recipient; file and folder picker also available.
-- Progress, speed, cancel, batch queue through multiple transfer connections.
-- No app-level accounts, passwords, pairing or transfer encryption.
-- Style inspired by tg.hl100.ru: near-black background, warm white monospaced text, red accents, fine borders, rectangular controls.
-- Windows per-user installer, Start menu shortcut, optional desktop shortcut, system uninstaller. Settings and received files survive updates/uninstall.
-- GitHub Releases: startup check and settings button, persistent main-window banner, user-triggered verified download and OS installation. LAN exchange works offline. Only the updater uses internet.
-- Android reception while the foreground service is running, with persistent notification; service starts from the visible app. No promise of unattended startup after boot or process termination.
+- Нативные Windows 10+ (C# / WPF), Android 12+ (Kotlin / Compose), macOS 12+ Intel / Apple Silicon (Swift / AppKit).
+- Общее Rust-ядро, платформенные интерфейсы и хранилища.
+- Прямой обмен в одной LAN, выбранный получатель, автоматический приём.
+- Первое включение: имя и папка сохранения, изменяемые в настройках.
+- Файлы / папки, вложения / пустые каталоги, drag and drop на компьютерах.
+- Имя, размер, скорость, прогресс, пауза / продолжение / отмена; папка в истории одним объектом.
+- Докачка с 1.1, восстановление после выхода из обоих приложений, совместимость с обычным обменом старых клиентов.
+- Выделение фактического готового объекта в Проводнике / Finder.
+- Windows: настройки в том же окне, трей, автозапуск, отключаемые уведомления, подсветка drop, пользовательский установщик.
+- Mac: панель строки меню, Pin, отдельное окно передач, universal app / dylib, варианты заголовка и значка.
+- Android: «Поделиться», фото / видео / файлы / папки, настраиваемый фон с таймером; активный фон требует уведомления.
+- Без авторизации, сопряжения, паролей и шифрования, для доверенной LAN.
+- Чёрный фон, тёплый белый, красный акцент, моноширинный текст и прямоугольные контролы в стиле tg.hl100.ru; акцент DROP.
+- Обновления GitHub Releases: проверка в настройках / при запуске, плашка, загрузка по действию и SHA-256. LAN работает без интернета.
+- Релизы: EXE, APK с постоянным ключом, universal DMG, checksums.txt.
 
-Defaults selected for v1: one recipient per action, concurrent independent transfers supported, no resume, no multicast file distribution. These can be extended without changing the initial setup.
+## Вне текущей версии
 
-## Release naming
+Облако, аккаунты, авторизация, IPv6, одновременная рассылка группе и публичный файловый сервер. Keenetic обсуждался, реализация пока не запрошена.
 
-Tag `v0.1.0`, assets `HL100DropSetup-0.1.0.exe`, `HL100Drop-0.1.0.apk`, `checksums.txt` (SHA-256). APK distribution key must remain the same across all published updates. Do not publish debug APKs as production updates.
+## Приёмочные сценарии
 
-## Acceptance checks
-
-Windows ↔ Android discovery and bidirectional transfer on a real LAN; nested/empty folders; Cyrillic filenames; zero-byte and large files; collision naming; cancellation/network loss; receive-directory access revoked/full storage; offline startup; updates with valid/invalid digest; upgrade keeping preferences; installer/uninstaller. macOS compatibility requires an actual Mac later.
+Реальные Windows ↔ Android ↔ Mac; папки / файлы, кириллица, пустое / большое, коллизии, пауза, отмена, сеть / перезапуск, недоступный оригинал / папка, офлайн, обновление с сохранением настроек. [Выполненные проверки](validation.md).
