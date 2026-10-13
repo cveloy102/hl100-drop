@@ -84,9 +84,10 @@ Validated locally on 2026-10-13:
 - Login checkbox enabled a quoted executable command with --login in HKCU Run;
   disabling it removed only the application's value. Original off preference
   was restored. Duplicate normal/login launches retained one app process.
-- Notification code compiled and transfer completion exercised. The desktop
-  inspection tool did not enumerate the taskbar-hidden notification window,
-  so its appearance and timing still need a manual check.
+- Received-file notification was visually verified at the lower right of the
+  maximized window. It shows the filename/size and reveal action. Disabling
+  notifications saved false and a new transfer completed without a popup;
+  the original enabled preference was restored.
 - The final APK was rebuilt after the saved-path fix. The phone was disconnected
   from ADB during final reinstall; that final artifact is available in the release.
 
