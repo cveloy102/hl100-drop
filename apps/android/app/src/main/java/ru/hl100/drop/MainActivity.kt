@@ -37,6 +37,7 @@ class MainActivity:ComponentActivity() {
     private var pendingApk:File?=null
     private val documents=registerForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { uris->selected?.let { peer->sendPicked(peer,uris) } }
     private val photos=registerForActivityResult(ActivityResultContracts.PickMultipleVisualMedia()) { uris->selected?.let { peer->sendPicked(peer,uris) } }
+    private val sendTree=registerForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri->if(uri!=null)selected?.let { peer->sendPicked(peer,listOf(uri),true) } }
     private val saveTree=registerForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri->if(uri!=null){contentResolver.takePersistableUriPermission(uri,Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION);folderPicked?.invoke(uri)} }
     override fun onCreate(savedInstanceState:Bundle?) {
         super.onCreate(savedInstanceState)
@@ -55,6 +56,7 @@ class MainActivity:ComponentActivity() {
                     pickerPeer?.let { peer->AlertDialog(onDismissRequest={pickerPeer=null},title={Text("Отправить на ${peer.name}")},text={Column{
                         Action("ФОТО И ВИДЕО"){selected=peer;pickerPeer=null;photos.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageAndVideo))}
                         Spacer(Modifier.height(12.dp));Action("ФАЙЛЫ"){selected=peer;pickerPeer=null;documents.launch(arrayOf("*/*"))}
+                        Spacer(Modifier.height(12.dp));Action("ПАПКА"){selected=peer;pickerPeer=null;sendTree.launch(null)}
                     }},confirmButton={},dismissButton={TextButton(onClick={pickerPeer=null}){Text("ОТМЕНА")}},shape=RectangleShape) }
                     if(configured&&sharedUris.isNotEmpty())AlertDialog(onDismissRequest={sharedUris=emptyList()},title={Text("Отправить через DROP")},text={Column(Modifier.verticalScroll(rememberScrollState())){
                         Text("${sharedUris.size} файлов · выбери устройство",color=Muted)
@@ -85,7 +87,7 @@ class MainActivity:ComponentActivity() {
                             if(DropState.transfers.isEmpty())Text("Твои передачи появятся здесь.",color=Muted,modifier=Modifier.padding(vertical=20.dp))
                             DropState.transfers.forEach { t->Column(Modifier.fillMaxWidth().padding(top=20.dp)) {
                                 Text("${if(t.direction=="send")"↑" else "↓"} ${t.name}",fontSize=18.sp)
-                                t.files.forEach{file->Text("${file.path} / ${if(file.directory)"ПАПКА" else bytes(file.size.toDouble())}",fontSize=13.sp,color=Paper,modifier=Modifier.padding(top=8.dp))};if(t.count>t.files.size)Text("Ещё ${t.count-t.files.size} объектов",color=Muted)
+                                t.files.forEach{file->Text("${file.path} / ${if(file.directory)"ПАПКА · ${bytes(file.size.toDouble())}" else bytes(file.size.toDouble())}",fontSize=13.sp,color=Paper,modifier=Modifier.padding(top=8.dp))};if(t.count>t.files.size)Text("Ещё ${t.count-t.files.size} объектов",color=Muted)
                                 if(t.status!="active")Text(bytes(t.total.toDouble()),color=Muted,fontSize=12.sp)
                                 Text(when(t.status){"done"->"Готово ✓";"cancelled"->"Отменено";"error"->"Ошибка: ${t.message}";else->"${bytes(t.done.toDouble())} / ${bytes(t.total.toDouble())}\n${bytes(t.speed)}/с"},color=Muted,modifier=Modifier.padding(vertical=8.dp))
                                 LinearProgressIndicator(progress={if(t.status=="done")1f else if(t.total>0)(t.done.toDouble()/t.total).toFloat() else 0f},modifier=Modifier.fillMaxWidth(),color=Red,trackColor=Color(0xFF30302D))
@@ -123,7 +125,7 @@ class MainActivity:ComponentActivity() {
     }
     override fun onStart(){super.onStart();TransferService.setVisible(true);if(DropState.name.isNotBlank()&&DropState.folder.isNotBlank())TransferService.start(this)}
     override fun onPause(){TransferService.setVisible(false);super.onPause()}
-    private fun sendPicked(peer:Peer,uris:List<Uri>){uris.forEach{uri->try{contentResolver.takePersistableUriPermission(uri,Intent.FLAG_GRANT_READ_URI_PERMISSION)}catch(_:SecurityException){}};TransferService.send(this,peer,uris)}
+    private fun sendPicked(peer:Peer,uris:List<Uri>,tree:Boolean=false){uris.forEach{uri->try{contentResolver.takePersistableUriPermission(uri,Intent.FLAG_GRANT_READ_URI_PERMISSION)}catch(_:SecurityException){}};TransferService.send(this,peer,uris,tree)}
     private fun receiveShare(value:Intent){
         if(value.action!=Intent.ACTION_SEND&&value.action!=Intent.ACTION_SEND_MULTIPLE)return
         val streams=if(value.action==Intent.ACTION_SEND_MULTIPLE)IntentCompat.getParcelableArrayListExtra(value,Intent.EXTRA_STREAM,Uri::class.java).orEmpty() else listOfNotNull(IntentCompat.getParcelableExtra(value,Intent.EXTRA_STREAM,Uri::class.java))

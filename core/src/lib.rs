@@ -68,7 +68,27 @@ struct Peer {
 }
 pub struct Source {
     pub entry: Entry,
+    pub local_path: Option<PathBuf>,
     pub open: Option<Box<dyn FnOnce() -> io::Result<File> + Send>>,
+}
+
+// UI metadata is separate from the full wire manifest. A tree is one item.
+fn display_entries(entries: &[Entry]) -> Vec<Entry> {
+    let mut result: Vec<Entry> = Vec::new();
+    let mut indices = HashMap::new();
+    for entry in entries {
+        let top = entry.path.split('/').next().unwrap_or(&entry.path);
+        let index = *indices.entry(top.to_string()).or_insert_with(|| {
+            result.push(Entry {
+                path: top.into(),
+                size: 0,
+                directory: entry.directory || entry.path.contains('/'),
+            });
+            result.len() - 1
+        });
+        result[index].size += entry.size;
+    }
+    result
 }
 
 pub trait Storage: Send + Sync {
@@ -478,7 +498,16 @@ impl Engine {
         let transfer = id.clone();
         self.spawn(move || {
             let total = sources.iter().map(|s| s.entry.size).sum::<u64>();
-            w.event(json!({"type":"transfer","transfer":transfer,"direction":"send","name":name,"total":total,"files":sources.len(),"entries":sources.iter().take(200).map(|s| &s.entry).collect::<Vec<_>>()}));
+            let manifest = sources.iter().map(|s| s.entry.clone()).collect::<Vec<_>>();
+            let display = display_entries(&manifest);
+            let display_values = display.iter().take(200).map(|entry| {
+                let mut value = serde_json::to_value(entry).unwrap();
+                if let Some(path) = sources.iter().find(|s| s.entry.path == entry.path).and_then(|s| s.local_path.as_ref()) {
+                    value["local_path"] = json!(path);
+                }
+                value
+            }).collect::<Vec<_>>();
+            w.event(json!({"type":"transfer","transfer":transfer,"direction":"send","name":name,"total":total,"files":sources.len(),"entries":manifest.iter().take(200).collect::<Vec<_>>(),"display_entries":display_values,"display_count":display.len()}));
             let result = (|| -> io::Result<()> {
                 let mut stream = TcpStream::connect_timeout(&addr, Duration::from_secs(5))?; setup_stream(&stream)?;
                 let c = w.config.lock().unwrap().clone();
@@ -526,7 +555,8 @@ impl Engine {
                 .lock()
                 .unwrap()
                 .insert(id.clone(), cancel.clone());
-            self.event(json!({"type":"transfer","transfer":id,"direction":"receive","name":offer.name,"total":total,"files":offer.entries.len(),"entries":offer.entries.iter().take(200).collect::<Vec<_>>()}));
+            let display = display_entries(&offer.entries);
+            self.event(json!({"type":"transfer","transfer":id,"direction":"receive","name":offer.name,"total":total,"files":offer.entries.len(),"entries":offer.entries.iter().take(200).collect::<Vec<_>>(),"display_entries":display.iter().take(200).collect::<Vec<_>>(),"display_count":display.len()}));
             let receive_result = (|| -> io::Result<()> {
                 frame_write(&mut stream, &json!({"ok":true}))?;
                 let mut done = 0;
@@ -538,9 +568,6 @@ impl Engine {
                     let mut file = self.storage.open(&id, entry)?;
                     let local_path = self.storage.local_path(&id, entry);
                     if entry.directory {
-                        if index < 200 {
-                            self.event(json!({"type":"file","transfer":id,"path":entry.path,"size":entry.size,"directory":true,"local_path":local_path}));
-                        }
                         continue;
                     }
                     let out = file
@@ -572,6 +599,9 @@ impl Engine {
                 }
                 frame_write(&mut stream, &json!({"ok":true}))?;
                 self.progress(&id, total, total, started);
+                for entry in display.iter().filter(|e| e.directory).take(200) {
+                    self.event(json!({"type":"file","transfer":id,"path":entry.path,"size":entry.size,"directory":true,"local_path":self.storage.local_path(&id,entry)}));
+                }
                 Ok(())
             })();
             if let Err(err) = &receive_result {
@@ -639,6 +669,7 @@ pub fn collect_paths(paths: &[String]) -> io::Result<Vec<Source>> {
         let directory = meta.is_dir();
         let source_path = path.to_path_buf();
         out.push(Source {
+            local_path: Some(fs::canonicalize(path)?),
             entry: Entry {
                 path: relative.clone(),
                 size: if directory { 0 } else { meta.len() },
@@ -770,6 +801,43 @@ mod android;
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn folder_display_keeps_one_root_with_aggregate_size() {
+        let entries = vec![
+            Entry {
+                path: "Фото".into(),
+                size: 0,
+                directory: true,
+            },
+            Entry {
+                path: "Фото/2026".into(),
+                size: 0,
+                directory: true,
+            },
+            Entry {
+                path: "Фото/2026/a.jpg".into(),
+                size: 12,
+                directory: false,
+            },
+            Entry {
+                path: "Фото/b.jpg".into(),
+                size: 25,
+                directory: false,
+            },
+            Entry {
+                path: "notes.txt".into(),
+                size: 7,
+                directory: false,
+            },
+        ];
+        let display = display_entries(&entries);
+        assert_eq!(display.len(), 2);
+        assert_eq!(display[0].path, "Фото");
+        assert!(display[0].directory);
+        assert_eq!(display[0].size, 37);
+        assert_eq!(display[1].size, 7);
+        assert_eq!(entries.len(), 5);
+    }
     #[test]
     fn stopped_listener_can_restart_immediately_on_same_port() {
         let root = std::env::temp_dir().join(format!("hl100-restart-{}", std::process::id()));
@@ -1025,6 +1093,7 @@ mod tests {
         let (entered_tx, entered_rx) = std::sync::mpsc::channel();
         let (release_tx, release_rx) = std::sync::mpsc::channel();
         let sources = vec![Source {
+            local_path: None,
             entry: Entry {
                 path: "cancelled.bin".into(),
                 size: 10000,

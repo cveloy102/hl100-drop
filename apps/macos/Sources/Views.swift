@@ -162,7 +162,7 @@ final class TransferFile: NSView {
         button.imagePosition = .imageLeading
         button.toolTip = path
         button.actionHandler = { [weak self] in self?.revealFile() }
-        let size = Style.label(entry["directory"] as? Bool == true ? "Папка" : bytes(entry["size"] as? Double ?? 0), size: 10, color: Style.muted)
+        let size = Style.label((entry["directory"] as? Bool == true ? "Папка · " : "") + bytes(entry["size"] as? Double ?? 0), size: 10, color: Style.muted)
         size.alignment = .right
         size.setContentHuggingPriority(.required, for: .horizontal)
         size.setContentCompressionResistancePriority(.required, for: .horizontal)
@@ -208,12 +208,13 @@ final class TransferRow: NSView {
         let direction = event["direction"] as? String == "send" ? "↑" : "↓"
         let title = Style.label("\(direction) \(event["name"] as? String ?? "Устройство")", size: 11, color: Style.muted)
         let header = NSStackView(views: [title, NSView(), cancel]); header.spacing = 4
-        let count = event["files"] as? Int ?? 0
+        let count = event["display_count"] as? Int ?? event["files"] as? Int ?? 0
         detail.stringValue = "\(count) объектов · \(bytes(total))"
-        let entries = event["entries"] as? [[String: Any]] ?? []
+        let entries = event["display_entries"] as? [[String: Any]] ?? event["entries"] as? [[String: Any]] ?? []
         let files = Style.stack(spacing: 1)
         for entry in entries {
             let file = TransferFile(entry: entry, reveal: reveal)
+            if entry["local_path"] is String { file.complete(entry) }
             fileViews.append(file); files.addArrangedSubview(file)
             file.widthAnchor.constraint(equalTo: files.widthAnchor).isActive = true
         }

@@ -20,12 +20,13 @@ class TransferService:Service() {
         fun setVisible(value:Boolean){visible=value;current?.refreshMode()}
         fun start(c:Context){c.startService(Intent(c,TransferService::class.java))}
         fun restart(c:Context){c.startService(Intent(c,TransferService::class.java).setAction("restart"))}
-        fun send(c:Context,peer:Peer,uris:List<Uri>){
+        fun send(c:Context,peer:Peer,uris:List<Uri>,tree:Boolean=false){
             if(uris.isEmpty())return
             val intent=Intent(c,TransferService::class.java).setAction("send")
                 .putExtra("peerId",peer.id).putExtra("peerName",peer.name)
                 .putExtra("address",peer.address).putExtra("port",peer.port).putExtra("platform",peer.platform)
                 .putParcelableArrayListExtra("uris",ArrayList(uris))
+                .putExtra("tree",tree)
                 .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
             intent.clipData=ClipData.newRawUri("DROP",uris.first()).apply{uris.drop(1).forEach{addItem(ClipData.Item(it))}}
             c.startService(intent)
@@ -58,7 +59,7 @@ class TransferService:Service() {
             val uris=IntentCompat.getParcelableArrayListExtra(intent,"uris",Uri::class.java).orEmpty()
             val peer=Peer(intent.getStringExtra("peerId").orEmpty(),intent.getStringExtra("peerName").orEmpty(),intent.getStringExtra("address").orEmpty(),intent.getIntExtra("port",41000),intent.getStringExtra("platform").orEmpty())
             pending++;refreshMode()
-            scope.launch{try{DropState.start(this@TransferService);DropState.send(this@TransferService,peer,uris)}finally{pending--;refreshMode()}}
+            scope.launch{try{DropState.start(this@TransferService);DropState.send(this@TransferService,peer,uris,intent.getBooleanExtra("tree",false))}finally{pending--;refreshMode()}}
         }
         refreshMode();return START_NOT_STICKY
     }

@@ -51,9 +51,9 @@ object DropState {
         when(e.getString("type")) {
             "error" -> status=e.optString("message")
             "transfer" -> {
-                val entries=e.optJSONArray("entries")?:JSONArray()
+                val entries=e.optJSONArray("display_entries")?:e.optJSONArray("entries")?:JSONArray()
                 val files=(0 until entries.length()).map{val entry=entries.getJSONObject(it);TransferFile(entry.getString("path"),entry.getLong("size"),entry.getBoolean("directory"))}
-                transfers=(listOf(Transfer(id,e.getString("name"),e.getString("direction"),e.getLong("total"),files=files,count=e.optInt("files",files.size)))+transfers)
+                transfers=(listOf(Transfer(id,e.getString("name"),e.getString("direction"),e.getLong("total"),files=files,count=e.optInt("display_count",e.optInt("files",files.size))))+transfers)
                 val active=transfers.filter{it.status=="active"};transfers=active+transfers.filter{it.status!="active"}.take((100-active.size).coerceAtLeast(0))
             }
             "progress" -> transfers=transfers.map { if(it.id==id)it.copy(done=e.getLong("done"),speed=e.getDouble("speed")) else it }

@@ -161,7 +161,11 @@ pub extern "system" fn Java_ru_hl100_drop_NativeBridge_command(
                         } else {
                             Some(Box::new(move || s.open_source(&uri)))
                         };
-                    sources.push(Source { entry, open });
+                    sources.push(Source {
+                        entry,
+                        local_path: None,
+                        open,
+                    });
                 }
                 let addr: SocketAddr = format!(
                     "{}:{}",
