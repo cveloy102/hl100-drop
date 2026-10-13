@@ -1,0 +1,15 @@
+.tools/
+/target/
+/artifacts/
+**/bin/
+**/obj/
+**/.gradle/
+**/build/
+**/local.properties
+**/jniLibs/
+*.keystore
+*.jks
+.idea/
+.vs/
+/private/
+*.user
