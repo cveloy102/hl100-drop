@@ -1,7 +1,11 @@
 # HL100 Drop — agreed requirements
 
-- Native Windows 10+ (C#/WPF), Android 12+ (Kotlin/Compose); macOS Intel + Apple Silicon planned as Swift/AppKit.
+- Native Windows 10+ (C#/WPF), Android 12+ (Kotlin/Compose), macOS 12+ Intel + Apple Silicon (Swift/AppKit).
 - Shared Rust transfer/discovery engine, OS-specific storage and UI.
+- macOS compact menu-bar panel: outside-click dismissal, persistent Pin toggle,
+  settings in an overflow menu; separate resizable transfer-history window.
+- macOS received items show filenames and sizes, retain size after completion,
+  and reveal the actual saved file/folder selected in Finder from either view.
 - Files and folders; recipient selected explicitly, automatic receive with no confirmation.
 - First-run setup: device name and receive folder; both editable in settings.
 - Desktop drag-and-drop to a recipient; file and folder picker also available.

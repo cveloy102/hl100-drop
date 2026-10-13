@@ -26,4 +26,41 @@ Still pending before calling this a stable release:
 - Actual newer-release banner, download and OS installation on both platforms.
 - Compatibility runs on Windows 10 and Android 12 (build minimums are configured).
 
-The macOS application has not been implemented yet; see `apps/macos/README.md`.
+## macOS implementation — 2026-10-13
+
+- Swift/AppKit client and embedded Rust engine built for x86_64 and arm64,
+  targeting macOS 12. Both Universal binaries checked with `lipo`.
+- Embedded library loads via `@rpath` inside the application bundle.
+- Six Rust regression tests passed on an Intel Mac.
+- Swift C ABI smoke test passed with real loopback TCP send/receive of a
+  multi-megabyte binary, Unicode names, zero-byte files, empty directories and
+  duplicate folder names. Settings reload and update metadata validation passed.
+- Compact menu-bar panel with `Hello, nearby_` rendered using the actual AppKit
+  view hierarchy; settings are embedded in the same panel.
+- AppKit interaction smoke test passed: status-icon drag entry opens the panel,
+  icon drop stages files without sending, non-file pasteboard content is rejected,
+  Pin prevents outside dismissal, an unpinned outside click closes the panel,
+  dragging does not dismiss it, and the status icon toggles a pinned panel.
+- Received filenames, sizes and collision-resolved local paths verified through
+  real TCP transfers. Click actions in the panel and separate transfer window
+  verified against the exact path; unfinished files cannot be revealed.
+- Four native template menu-bar icons rendered and checked at small size.
+  AppKit smoke test verifies icon selection/checkmarks, persisted preference and
+  fallback to Bolt for unrecognized saved values.
+- Three selectable title styles rendered: Lightning + DROP (default), Large DROP,
+  Terminal; rejected red-DROP variant excluded.
+- Login tests passed: isolated Monterey agent enable/disable/reload, app paths with
+  spaces/Unicode, background flag and native login Apple-event detection.
+  AppKit checks the checkbox, registration-error rollback and OS approval state;
+  test fixtures do not alter the user's real login registrations.
+- First-run settings view rendered and visually inspected. Universal app
+  launches on Intel; bundle signatures and the generated DMG integrity verified.
+  Distribution signing remains ad-hoc, without Apple notarization.
+
+Still pending: physical M1 Pro execution; macOS 12 runtime checks; Windows and
+Android LAN transfers; actual Finder drag/drop and picker interaction;
+local-network/TCC permission behavior; actual logout/login and system approval
+on macOS 12 and 13+; background reception and sleep/wake;
+Developer ID signing/notarization and a real newer-version update.
+
+See `apps/macos/README.md` for build, installation and signing instructions.

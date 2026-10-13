@@ -31,6 +31,23 @@ Streaming buffer: 1 MiB. Progress events no more often than every 150 ms. Cancel
 {"op":"stop"}
 ```
 
-`poll` returns `peers`, `events`, `busy`. Events: `started`, `transfer`, `progress`, `complete`, `error`. `complete.status` is `done`, `cancelled` or `error`. Commands return `{ok:false,error}` on failure. Changing settings is allowed only when no transfers are active.
+`poll` returns `peers`, `events`, `busy`. Events: `started`, `transfer`, `file`, `progress`, `complete`, `error`. `complete.status` is `done`, `cancelled` or `error`. Commands return `{ok:false,error}` on failure. Changing settings is allowed only when no transfers are active.
 
 Android uses the same engine via JNI. Its send manifest additionally carries a content URI per source. JNI calls `openSource` lazily and writes directly to SAF descriptors returned by `openReceive`; `finishReceive` renames partial documents. No staging copy is required.
+
+### Local file metadata
+
+`transfer` includes `entries:[{path,size,directory}]` for the first 200 manifest
+entries, in manifest order; `files` still counts the full manifest and `total`
+remains the full batch byte count. This limit bounds polling payloads and history.
+The receiver emits `file` for each of those entries after successfully creating
+its directory or finalizing its file. It contains `transfer`, `path`, `size`,
+`directory` and `local_path`. Disk storage returns the actual collision-resolved
+path; storage without filesystem paths (Android SAF) returns null. An item whose
+save fails has no `file` event. Previously finalized files remain available even
+if the batch later fails. Capture the path before `finish`, which releases the
+partial-file record, and publish it only after a successful finalization.
+
+These fields and events are local C ABI/JNI additions. Network protocol v1 and
+ACKs are unchanged; existing Windows/Android clients ignore unknown event types
+and additional fields. The updated macOS app can transfer to older clients.

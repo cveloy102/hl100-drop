@@ -1,6 +1,6 @@
 # HL100 Drop
 
-Native file sharing over a local network. Windows 10+, Android 12+, future macOS Intel/Apple Silicon. Windows uses WPF, Android uses Jetpack Compose, both use the same Rust engine.
+Native file sharing over a local network. Windows 10+, Android 12+, macOS 12+ Intel/Apple Silicon. Windows uses WPF, Android uses Jetpack Compose, macOS uses Swift/AppKit; all use the same Rust engine.
 
 ## Layout
 
@@ -8,7 +8,7 @@ Native file sharing over a local network. Windows 10+, Android 12+, future macOS
 - `apps/windows`: native desktop UI, drag-and-drop, tray, settings, GitHub updater.
 - `apps/android`: native phone UI, SAF storage, receive service, GitHub updater.
 - `installer/windows`: Inno Setup per-user installer.
-- `apps/macos`: integration handoff for the next stage.
+- `apps/macos`: native AppKit desktop UI, drag-and-drop, menu bar, settings and verified DMG updates.
 - `docs`: agreed requirements and protocol.
 
 ## Windows build
@@ -50,11 +50,16 @@ Repository: https://github.com/cveloy102/hl100-drop. Checks use the latest stabl
 
 `scripts/publish-release.ps1` publishes built assets and SHA-256 checksums using the existing Git Credential Manager login. Releases are marked as prereleases by default; use `-Stable` only after device validation. Prereleases are available for manual download but do not trigger production update banners. Before a new version, increment the Rust package version, Windows project version and Android versionName/versionCode together.
 
-## Continue on Mac
+## macOS build
+
+Install Apple's Command Line Tools and Rust via rustup, then:
 
 ```sh
-git clone https://github.com/cveloy102/hl100-drop.git
-cd hl100-drop
+./scripts/build-macos.sh
+./scripts/test-macos.sh
 ```
 
-Read `apps/macos/README.md` and `docs/protocol.md`, then implement the AppKit app against the existing C ABI. The macOS app is not implemented in this stage.
+Output: `artifacts/HL100Drop-0.1.1-universal.dmg`. Drag the application to Applications.
+Both the app and Rust dylib include Intel and ARM slices. Default builds use ad-hoc
+signing for development; public distribution requires Developer ID signing and
+notarization. See `apps/macos/README.md` for usage, release signing and validation.

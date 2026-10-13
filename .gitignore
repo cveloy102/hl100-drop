@@ -13,3 +13,4 @@
 .vs/
 /private/
 *.user
+.DS_Store

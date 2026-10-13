@@ -66,6 +66,9 @@ pub trait Storage: Send + Sync {
     fn open(&self, transfer: &str, entry: &Entry) -> io::Result<Option<File>>;
     fn finish(&self, transfer: &str, entry: &Entry) -> io::Result<()>;
     fn abort(&self, transfer: &str);
+    fn local_path(&self, _transfer: &str, _entry: &Entry) -> Option<PathBuf> {
+        None
+    }
 }
 pub struct DiskStorage {
     root: PathBuf,
@@ -151,6 +154,13 @@ impl Storage for DiskStorage {
             .open(&temp)?;
         paths.insert(key(transfer, &entry.path), (temp, target));
         Ok(Some(file))
+    }
+    fn local_path(&self, transfer: &str, entry: &Entry) -> Option<PathBuf> {
+        let relative = valid_path(&entry.path).ok()?;
+        let top = relative.components().next()?.as_os_str().to_string_lossy();
+        let paths = self.paths.lock().unwrap();
+        let (_, chosen) = paths.get(&key(transfer, &format!("@/{top}")))?;
+        Some(chosen.join(relative.components().skip(1).collect::<PathBuf>()))
     }
     fn finish(&self, transfer: &str, entry: &Entry) -> io::Result<()> {
         if entry.directory {
@@ -414,7 +424,7 @@ impl Engine {
         let transfer = id.clone();
         self.spawn(move || {
             let total = sources.iter().map(|s| s.entry.size).sum::<u64>();
-            w.event(json!({"type":"transfer","transfer":transfer,"direction":"send","name":name,"total":total,"files":sources.len()}));
+            w.event(json!({"type":"transfer","transfer":transfer,"direction":"send","name":name,"total":total,"files":sources.len(),"entries":sources.iter().take(200).map(|s| &s.entry).collect::<Vec<_>>()}));
             let result = (|| -> io::Result<()> {
                 let mut stream = TcpStream::connect_timeout(&addr, Duration::from_secs(5))?; setup_stream(&stream)?;
                 let c = w.config.lock().unwrap().clone();
@@ -462,17 +472,21 @@ impl Engine {
                 .lock()
                 .unwrap()
                 .insert(id.clone(), cancel.clone());
-            self.event(json!({"type":"transfer","transfer":id,"direction":"receive","name":offer.name,"total":total,"files":offer.entries.len()}));
+            self.event(json!({"type":"transfer","transfer":id,"direction":"receive","name":offer.name,"total":total,"files":offer.entries.len(),"entries":offer.entries.iter().take(200).collect::<Vec<_>>()}));
             let receive_result = (|| -> io::Result<()> {
                 frame_write(&mut stream, &json!({"ok":true}))?;
                 let mut done = 0;
                 let started = Instant::now();
                 let mut update = Instant::now();
                 let mut buffer = vec![0; BUFFER];
-                for entry in &offer.entries {
+                for (index, entry) in offer.entries.iter().enumerate() {
                     check_cancel(&cancel)?;
                     let mut file = self.storage.open(&id, entry)?;
+                    let local_path = self.storage.local_path(&id, entry);
                     if entry.directory {
+                        if index < 200 {
+                            self.event(json!({"type":"file","transfer":id,"path":entry.path,"size":entry.size,"directory":true,"local_path":local_path}));
+                        }
                         continue;
                     }
                     let out = file
@@ -497,6 +511,9 @@ impl Engine {
                     out.flush()?;
                     drop(file);
                     self.storage.finish(&id, entry)?;
+                    if index < 200 {
+                        self.event(json!({"type":"file","transfer":id,"path":entry.path,"size":entry.size,"directory":false,"local_path":local_path}));
+                    }
                     frame_write(&mut stream, &json!({"ok":true}))?;
                 }
                 frame_write(&mut stream, &json!({"ok":true}))?;
