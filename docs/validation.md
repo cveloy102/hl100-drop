@@ -109,3 +109,22 @@ Actual Windows logout/login and stable-release update remain untested.
 - Windows installer rebuilt; folder-picker buttons below devices removed on
   both platforms. Receive-folder settings and Windows folder drag/drop retained.
 - Core/protocol unchanged at 0.1.2; no macOS rebuild needed for this UI release.
+
+## Restart correction — 0.1.4
+
+- User confirmed photo/file selection and share-to-DROP transfers on Poco F7,
+  including a ~5.3 MB file to Windows and macOS. Reported error 98 when enabling
+  background reception; screenshot confirmed Address already in use.
+- Background/update-only settings now reconfigure the service without an engine
+  restart. Rust stop joins the listener thread; Unix listeners use SO_REUSEADDR
+  to rebind after closed TCP connections. Protocol unchanged, core now 0.1.3.
+- All nine Windows Rust tests, formatting and Clippy passed. New test performs
+  sixteen immediate stop/start cycles on the same port. Unix-only regression
+  additionally checks four completed TCP connections and immediate rebinds.
+- Windows installer and signed Android APK 0.1.4 built; APK installed on Poco F7.
+  User confirmed enabling background mode, reopening, disabling and reopening
+  again: no error 98, device discovery works.
+- Three background session tests and Android lint passed for the preceding
+  lifecycle implementation. No changes to that policy in the restart fix.
+- Long physical timer expiry and background reception during screen-off still
+  need manual validation; timer boundaries/active transfer completion unit-tested.

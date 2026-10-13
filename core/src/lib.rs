@@ -211,6 +211,7 @@ pub struct Engine {
     peers: Mutex<HashMap<String, (Peer, Instant)>>,
     transfers: Mutex<HashMap<String, Arc<AtomicBool>>>,
     workers: Mutex<Vec<thread::JoinHandle<()>>>,
+    listener_worker: Mutex<Option<thread::JoinHandle<()>>>,
     listener_port: u16,
 }
 fn frame_write(stream: &mut TcpStream, value: &impl Serialize) -> io::Result<()> {
@@ -256,6 +257,15 @@ impl Engine {
         if config.name.trim().is_empty() || config.id.is_empty() {
             return Err(io::Error::other("Укажите имя устройства"));
         }
+        #[cfg(unix)]
+        let listener: TcpListener = {
+            let socket = Socket::new(Domain::IPV4, Type::STREAM, Some(Protocol::TCP))?;
+            socket.set_reuse_address(true)?;
+            socket.bind(&SocketAddr::from((Ipv4Addr::UNSPECIFIED, config.port)).into())?;
+            socket.listen(128)?;
+            socket.into()
+        };
+        #[cfg(not(unix))]
         let listener = TcpListener::bind((Ipv4Addr::UNSPECIFIED, config.port))?;
         listener.set_nonblocking(true)?;
         let port = listener.local_addr()?.port();
@@ -267,13 +277,16 @@ impl Engine {
             peers: Mutex::new(HashMap::new()),
             transfers: Mutex::new(HashMap::new()),
             workers: Mutex::new(Vec::new()),
+            listener_worker: Mutex::new(None),
             listener_port: port,
         });
         let worker = e.clone();
         let handle = thread::spawn(move || {
             while !worker.stopped.load(Ordering::Relaxed) {
                 match listener.accept() {
-                    Ok((stream, addr)) if local_address(addr.ip()) => {
+                    Ok((stream, addr))
+                        if !worker.stopped.load(Ordering::Relaxed) && local_address(addr.ip()) =>
+                    {
                         let w = worker.clone();
                         worker.spawn(move || w.receive(stream));
                     }
@@ -293,7 +306,7 @@ impl Engine {
                 }
             }
         });
-        e.workers.lock().unwrap().push(handle);
+        *e.listener_worker.lock().unwrap() = Some(handle);
         let w = e.clone();
         e.spawn(move || {
             let mut previous_error = String::new();
@@ -328,6 +341,10 @@ impl Engine {
         self.stopped.store(true, Ordering::Relaxed);
         for c in self.transfers.lock().unwrap().values() {
             c.store(true, Ordering::Relaxed);
+        }
+        // Returning from stop guarantees the listening port is available again.
+        if let Some(listener) = self.listener_worker.lock().unwrap().take() {
+            let _ = listener.join();
         }
     }
     pub fn busy(&self) -> bool {
@@ -753,6 +770,68 @@ mod android;
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn stopped_listener_can_restart_immediately_on_same_port() {
+        let root = std::env::temp_dir().join(format!("hl100-restart-{}", std::process::id()));
+        let mut port = 0;
+        for _ in 0..16 {
+            let receiver = Engine::start(
+                Config {
+                    id: "restart-test".into(),
+                    name: "Receiver".into(),
+                    folder: root.to_string_lossy().into(),
+                    port,
+                },
+                Arc::new(DiskStorage::new(&root)),
+            )
+            .unwrap();
+            port = receiver.listener_port;
+            receiver.stop();
+        }
+    }
+    #[cfg(unix)]
+    #[test]
+    fn receiver_restarts_after_closed_tcp_connection() {
+        let root = std::env::temp_dir().join(format!("hl100-time-wait-{}", std::process::id()));
+        fs::create_dir_all(&root).unwrap();
+        let mut port = 0;
+        for n in 0..4 {
+            let receiver = Engine::start(
+                Config {
+                    id: "restart-test".into(),
+                    name: "Receiver".into(),
+                    folder: root.to_string_lossy().into(),
+                    port,
+                },
+                Arc::new(DiskStorage::new(&root)),
+            )
+            .unwrap();
+            port = receiver.listener_port;
+            let mut stream = TcpStream::connect((Ipv4Addr::LOCALHOST, port)).unwrap();
+            setup_stream(&stream).unwrap();
+            frame_write(
+                &mut stream,
+                &Offer {
+                    protocol: 1,
+                    id: "test".into(),
+                    name: "Test".into(),
+                    transfer: format!("restart-{n}"),
+                    entries: vec![Entry {
+                        path: format!("empty-{n}"),
+                        size: 0,
+                        directory: true,
+                    }],
+                },
+            )
+            .unwrap();
+            assert_eq!(frame_read::<Value>(&mut stream).unwrap()["ok"], true);
+            assert_eq!(frame_read::<Value>(&mut stream).unwrap()["ok"], true);
+            assert_eq!(stream.read(&mut [0]).unwrap(), 0);
+            drop(stream);
+            receiver.stop();
+        }
+        fs::remove_dir_all(root).unwrap();
+    }
     #[test]
     fn saved_file_path_is_exact_after_collision() {
         let root = std::env::temp_dir().join(format!("hl100-reveal-{}", std::process::id()));

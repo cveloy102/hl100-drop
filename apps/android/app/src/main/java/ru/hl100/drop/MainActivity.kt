@@ -66,8 +66,9 @@ class MainActivity:ComponentActivity() {
                         HorizontalDivider(Modifier.padding(vertical=20.dp),color=Color(0xFF30302D))
                         if(!configured||settings) {
                             SettingsPanel(first=!configured,onSave={name,folder,updates,background,minutes->
+                                val restart=DropState.name!=name||DropState.folder!=folder||!DropState.running
                                 prefs.edit().putString("name",name).putString("folder",folder).putBoolean("updates",updates).putBoolean("background",background).putInt("backgroundMinutes",minutes).apply();DropState.name=name;DropState.folder=folder;configured=true;settings=false
-                                TransferService.restart(this@MainActivity)
+                                if(restart)TransferService.restart(this@MainActivity) else TransferService.start(this@MainActivity)
                             },onBack={settings=false})
                         } else {
                             DropState.release?.let { release->Column(Modifier.fillMaxWidth().border(1.dp,Red).padding(16.dp)){Text("Доступна версия ${release.version}");Spacer(Modifier.height(8.dp));Action(DropState.updateProgress?:"ОБНОВИТЬСЯ ↗",DropState.updateProgress==null){update()}};Spacer(Modifier.height(20.dp)) }
