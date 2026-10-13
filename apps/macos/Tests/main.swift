@@ -61,15 +61,18 @@ do {
                 if event["type"] as? String == "transfer" {
                     let entries = event["entries"] as? [[String: Any]] ?? []
                     try require(entries.contains { $0["path"] as? String == "Папка/файл.bin" && $0["size"] as? Int == payload.count }, "File names/sizes missing")
+                    let visible = event["display_entries"] as? [[String: Any]] ?? []
+                    try require(visible.count == 1 && visible[0]["path"] as? String == "Папка" && visible[0]["directory"] as? Bool == true && visible[0]["size"] as? Int == payload.count, "Folder summary missing")
                     described += 1
                 }
-                if event["type"] as? String == "file", event["directory"] as? Bool != true {
+                if event["type"] as? String == "file" {
+                    try require(event["directory"] as? Bool == true && event["path"] as? String == "Папка", "Expected one finalized folder event")
                     guard let path = event["local_path"] as? String else { throw DropError(message: "No finalized local path") }
                     try require(FileManager.default.fileExists(atPath: path), "Reveal path does not exist")
-                    try require(receivedPaths.insert(path).inserted, "Collision returned the previous file path")
-                    let data = try Data(contentsOf: URL(fileURLWithPath: path))
-                    try require(data.count == event["size"] as? Int, "Received size mismatch")
-                    try require(data == (path.hasSuffix("zero.txt") ? Data() : payload), "Revealed file content mismatch")
+                    try require(receivedPaths.insert(path).inserted, "Collision returned the previous folder path")
+                    let folder = URL(fileURLWithPath: path)
+                    let revealedData = try Data(contentsOf: folder.appendingPathComponent("файл.bin"))
+                    try require(revealedData == payload, "Revealed folder content mismatch")
                     revealed += 1
                 }
                 if event["type"] as? String == "complete" {
@@ -80,9 +83,9 @@ do {
             Thread.sleep(forTimeInterval: 0.02)
         }
         try require(completed == 2, "Timed out waiting for send and receive completion")
-        try require(described == 2 && revealed == 2, "Incomplete file metadata events")
+        try require(described == 2 && revealed == 1, "Incomplete file metadata events")
     }
-    let folders = try FileManager.default.contentsOfDirectory(at: receive, includingPropertiesForKeys: nil)
+    let folders = try FileManager.default.contentsOfDirectory(at: receive, includingPropertiesForKeys: nil).filter { $0.lastPathComponent != ".drop-state" }
     try require(folders.count == 2, "Collision did not preserve both folders")
     for folder in folders {
         let received = try Data(contentsOf: folder.appendingPathComponent("файл.bin"))

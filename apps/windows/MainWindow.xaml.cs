@@ -94,8 +94,8 @@ public partial class MainWindow : Window {
             stack.Children.Add(new TextBlock{Text=$"{(e.GetProperty("direction").GetString()=="send"?"↑":"↓")} {e.GetProperty("name").GetString()}",FontSize=18});
             var createdRow=new TransferRow{Total=e.GetProperty("total").GetInt64(),Receiving=e.GetProperty("direction").GetString()=="receive",Count=e.TryGetProperty("display_count",out var count)?count.GetInt32():e.GetProperty("files").GetInt32()};
             createdRow.Text=new TextBlock{Text=$"{createdRow.Count} объектов / {Bytes(createdRow.Total)}",Foreground=(Brush)FindResource("Muted"),Margin=new Thickness(0,8,0,12),TextWrapping=TextWrapping.Wrap};
-            createdRow.Cancel=new Button{Content="ОТМЕНИТЬ",Background=Brushes.Transparent,Foreground=(Brush)FindResource("Muted"),HorizontalAlignment=HorizontalAlignment.Left};createdRow.Cancel.Click+=async(_,_)=>await Task.Run(()=>Native.Call(new{op="cancel",transfer=id}));
-            createdRow.Pause=new Button{Content="ПАУЗА",IsEnabled=e.TryGetProperty("resumable",out var canResume)&&canResume.GetBoolean(),Background=Brushes.Transparent,HorizontalAlignment=HorizontalAlignment.Left,Margin=new Thickness(0,8,0,8)};
+            createdRow.Cancel=new Button{Content="ОТМЕНИТЬ",Background=new SolidColorBrush(Color.FromRgb(38,38,35)),Foreground=(Brush)FindResource("Paper"),HorizontalAlignment=HorizontalAlignment.Left,Margin=new Thickness(12,0,0,0)};createdRow.Cancel.Click+=async(_,_)=>await Task.Run(()=>Native.Call(new{op="cancel",transfer=id}));
+            createdRow.Pause=new Button{Content="ПАУЗА",IsEnabled=e.TryGetProperty("resumable",out var canResume)&&canResume.GetBoolean(),Background=(Brush)FindResource("Red"),Foreground=new SolidColorBrush(Color.FromRgb(16,16,16)),HorizontalAlignment=HorizontalAlignment.Left};
             createdRow.Pause.Click+=async(_,_)=>{try{var result=await Task.Run(()=>Native.Call(new{op=createdRow.State=="paused"?"resume":"pause",transfer=id}));Native.Check(result);}catch(Exception error){Status.Text=error.Message;}};
             if(e.TryGetProperty("display_entries",out var entries)||e.TryGetProperty("entries",out entries)){foreach(var entry in entries.EnumerateArray()){
                 var path=entry.GetProperty("path").GetString()!;if(createdRow.FirstName.Length==0)createdRow.FirstName=path;
@@ -104,7 +104,7 @@ public partial class MainWindow : Window {
                 if(entry.TryGetProperty("local_path",out var source)&&source.ValueKind==JsonValueKind.String){var sourcePath=source.GetString()!;fileButton.IsEnabled=true;fileButton.ToolTip="Показать в папке: "+sourcePath;fileButton.Click+=(_,_)=>Reveal(sourcePath);}
                 createdRow.Files[path]=fileButton;stack.Children.Add(fileButton);
             }if(createdRow.Count>createdRow.Files.Count)stack.Children.Add(new TextBlock{Text=$"Ещё {createdRow.Count-createdRow.Files.Count} объектов",Foreground=(Brush)FindResource("Muted")});}
-            stack.Children.Add(createdRow.Text);stack.Children.Add(createdRow.Bar);stack.Children.Add(createdRow.Pause);stack.Children.Add(createdRow.Cancel);TransferList.Children.Insert(0,stack);transfers[id]=createdRow;
+            stack.Children.Add(createdRow.Text);stack.Children.Add(createdRow.Bar);var controls=new StackPanel{Orientation=Orientation.Horizontal,Margin=new Thickness(0,12,0,0)};controls.Children.Add(createdRow.Pause);controls.Children.Add(createdRow.Cancel);stack.Children.Add(controls);TransferList.Children.Insert(0,stack);transfers[id]=createdRow;
             // Keep the UI bounded during long sessions; active transfers are retained.
             TrimHistory();
         }
