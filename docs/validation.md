@@ -94,3 +94,18 @@ Validated locally on 2026-10-13:
 No macOS binary rebuilt on this Windows host. Existing macOS verification above
 belongs to the imported macOS revision; the updated core needs a Mac rebuild.
 Actual Windows logout/login and stable-release update remain untested.
+
+## Windows / Android — 0.1.3
+
+- Android defaults to visible-app reception with no foreground notification.
+  Optional background sessions last 15/30/60 minutes after leaving the app,
+  or indefinitely. An active transfer may finish after reception expires.
+- Three JVM tests for BackgroundSession passed; Android lint passed. Gradle's
+  test worker could not load classes from the Cyrillic Windows checkout path;
+  the same source/tests ran successfully in an ASCII temporary build directory.
+- Signed release APK installed on physical Poco F7. Photo picker, file picker,
+  ACTION_SEND / ACTION_SEND_MULTIPLE and content-URI grant handoff added.
+  Manual physical share/picker/background verification is pending.
+- Windows installer rebuilt; folder-picker buttons below devices removed on
+  both platforms. Receive-folder settings and Windows folder drag/drop retained.
+- Core/protocol unchanged at 0.1.2; no macOS rebuild needed for this UI release.

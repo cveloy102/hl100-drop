@@ -5,6 +5,8 @@ import android.net.Uri
 import androidx.compose.runtime.*
 import androidx.documentfile.provider.DocumentFile
 import kotlinx.coroutines.*
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.IOException
@@ -26,20 +28,24 @@ object DropState {
     var release by mutableStateOf<ReleaseInfo?>(null)
     var updateProgress by mutableStateOf<String?>(null)
     private var polling:Job?=null
+    private val engine=Mutex()
+    var backgroundUntil by mutableStateOf(0L)
     fun preferences(c:Context)=c.getSharedPreferences("hl100",Context.MODE_PRIVATE)
-    suspend fun start(c:Context) {
+    suspend fun start(c:Context)=engine.withLock {
+        if(running)return@withLock
         val p=preferences(c);name=p.getString("name","")!!;folder=p.getString("folder","")!!
-        if(name.isBlank()||folder.isBlank())return
+        if(name.isBlank()||folder.isBlank())return@withLock
         val id=p.getString("id",null) ?: UUID.randomUUID().toString().also { p.edit().putString("id",it).apply() }
         polling?.cancel()
         try {
             val next=NativeBridge(c.applicationContext,Uri.parse(folder))
+            bridge=next
             withContext(Dispatchers.IO) { check(next.call(JSONObject().put("op","start").put("config",JSONObject().put("id",id).put("name",name).put("folder",folder)))) }
             bridge=next;running=true;status="Готов к отправке и автоматическому приёму"
             polling=scope.launch { while(isActive) { try { val state=withContext(Dispatchers.IO) { next.call(JSONObject().put("op","poll")) };busy=state.optBoolean("busy");val list=state.getJSONArray("peers");peers=(0 until list.length()).map { val e=list.getJSONObject(it);Peer(e.getString("id"),e.getString("name"),e.getString("address"),e.getInt("port"),e.getString("platform")) }.sortedBy { it.name };val events=state.getJSONArray("events");for(i in 0 until events.length())event(events.getJSONObject(i)) } catch(e:Exception) { status=e.message?:"Ошибка" };delay(200) } }
-        }catch(e:Exception){running=false;status="Не удалось запустить: ${e.message}"}
+        }catch(e:CancellationException){throw e}catch(e:Exception){running=false;status="Не удалось запустить: ${e.message}"}
     }
-    fun stop(){polling?.cancel();bridge?.call(JSONObject().put("op","stop"));running=false;busy=false;peers=emptyList()}
+    suspend fun stop()=engine.withLock {polling?.cancelAndJoin();withContext(Dispatchers.IO){bridge?.call(JSONObject().put("op","stop"))};bridge=null;running=false;busy=false;peers=emptyList();status="Приём выключен"}
     private fun event(e:JSONObject) {
         val id=e.optString("transfer")
         when(e.getString("type")) {

@@ -19,7 +19,7 @@ Install Rust (MSVC + Visual Studio Build Tools, or GNU + GCC MinGW), .NET 8 SDK 
 ./scripts/build-windows.ps1
 ```
 
-Output: `artifacts/HL100DropSetup-0.1.2.exe`. The published app includes its .NET runtime. Installation requires no administrator rights. The first connection may require the standard Windows Firewall prompt to allow local-network access.
+Output: `artifacts/HL100DropSetup-0.1.3.exe`. The published app includes its .NET runtime. Installation requires no administrator rights. The first connection may require the standard Windows Firewall prompt to allow local-network access.
 
 ## Android build
 
@@ -31,7 +31,7 @@ Install JDK, Android SDK 37, NDK r27d or newer, Rust targets `aarch64-linux-andr
 
 This makes a debug APK for device testing. Production APKs require a permanent signing key; set `HL100_KEYSTORE`, `HL100_STORE_PASSWORD`, `HL100_KEY_ALIAS`, `HL100_KEY_PASSWORD`, then run with `-Release`. Keep the key out of Git and preserve it for future updates.
 
-For a local signing key, run `scripts/initialize-signing.ps1` once. It saves the key and configuration in `private/` (excluded from Git). Back up both files privately. `build-android.ps1 -Release` reads this configuration automatically. Copy the resulting APK to `artifacts/HL100Drop-0.1.2.apk` before publishing.
+For a local signing key, run `scripts/initialize-signing.ps1` once. It saves the key and configuration in `private/` (excluded from Git). Back up both files privately. `build-android.ps1 -Release` reads this configuration automatically. Copy the resulting APK to `artifacts/HL100Drop-0.1.3.apk` before publishing.
 
 ## Core verification
 

@@ -6,7 +6,7 @@
     <UseWindowsForms>true</UseWindowsForms>
     <Nullable>enable</Nullable>
     <AssemblyName>HL100Drop</AssemblyName>
-    <Version>0.1.2</Version>
+    <Version>0.1.3</Version>
     <ApplicationManifest>app.manifest</ApplicationManifest>
     <ApplicationIcon>assets/drop.ico</ApplicationIcon>
   </PropertyGroup>
