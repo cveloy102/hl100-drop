@@ -1,4 +1,4 @@
-name: Build and verify
+name: Сборка и проверка
 on:
   push:
   pull_request:
@@ -14,6 +14,15 @@ jobs:
           targets: x86_64-apple-darwin,aarch64-apple-darwin
       - run: bash scripts/build-macos.sh
       - run: bash scripts/test-macos.sh
+      - name: Скриншоты настоящего интерфейса AppKit
+        run: |
+          mkdir -p artifacts/screenshots
+          HL100_UI_SMOKE_PATH="$PWD/artifacts/screenshots/macos-main.png" artifacts/macos/'HL100 Drop.app'/Contents/MacOS/HL100Drop --ui-smoke
+          HL100_UI_SMOKE_PATH="$PWD/artifacts/screenshots/macos-settings.png" artifacts/macos/'HL100 Drop.app'/Contents/MacOS/HL100Drop --ui-smoke --ui-settings-smoke
+      - uses: actions/upload-artifact@v4
+        with:
+          name: macos-screenshots
+          path: artifacts/screenshots/*.png
       - uses: actions/upload-artifact@v4
         with:
           name: macos-universal-installer
