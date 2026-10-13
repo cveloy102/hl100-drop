@@ -59,7 +59,7 @@ Install Apple's Command Line Tools and Rust via rustup, then:
 ./scripts/test-macos.sh
 ```
 
-Output: `artifacts/HL100Drop-0.1.1-universal.dmg`. Drag the application to Applications.
+Output: `artifacts/HL100Drop-<core-version>-universal.dmg`. Drag the application to Applications.
 Both the app and Rust dylib include Intel and ARM slices. Default builds use ad-hoc
 signing for development; public distribution requires Developer ID signing and
 notarization. See `apps/macos/README.md` for usage, release signing and validation.

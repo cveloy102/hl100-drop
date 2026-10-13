@@ -128,3 +128,24 @@ Actual Windows logout/login and stable-release update remain untested.
   lifecycle implementation. No changes to that policy in the restart fix.
 - Long physical timer expiry and background reception during screen-off still
   need manual validation; timer boundaries/active transfer completion unit-tested.
+
+## macOS transfer/discovery recovery — 2026-10-13
+
+- Thirteen Rust tests passed on the integrated core, including recovery after an occupied UDP
+  port becomes available, shared discovery sockets and preservation of receiver
+  storage errors instead of a generic Broken pipe message.
+- Real Mac → Windows LAN transfers of generated 1 MiB and 32 MiB files completed;
+  Windows acknowledged file finalization. This verifies protocol compatibility
+  with the existing Windows receiver; it is not a remote SHA-256 comparison.
+- macOS holds explicit activity tokens for background reception and active
+  transfers, prevents idle system sleep only during a transfer, and releases
+  the tokens on completion/shutdown. Discovery interfaces refresh automatically
+  and failed discovery sockets are recreated.
+- After the installed Mac app was updated and restarted, the user confirmed
+  that Windows reappeared and the original video completed successfully.
+  The exact original receiver-side error is unavailable because Windows had
+  been closed; the recovery fixes do not implement transfer resume.
+
+The final Mac rebuild uses the latest shared-core revision (0.1.3), preserving
+the Windows/Android listener-restart and EINTR fixes; repeat 1 MiB/32 MiB LAN
+transfers, Swift/AppKit checks, formatting and Clippy passed.

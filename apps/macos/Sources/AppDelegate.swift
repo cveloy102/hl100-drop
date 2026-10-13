@@ -2,6 +2,8 @@ import AppKit
 
 final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMenuDelegate {
     private let engine = Engine()
+    private let networkActivity = NetworkActivity()
+    private var discoveryState = "starting"
     private var settings = Settings()
     private let popover = NSPopover()
     private let panelController = NSViewController()
@@ -306,11 +308,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
     private func start(_ next: Settings, completion: @escaping (Error?) -> Void) {
         guard !starting else { completion(DropError(message: "Дождитесь запуска")); return }
         starting = true
+        networkActivity.setListening(true)
         DispatchQueue.global(qos: .userInitiated).async {
             let folderResult = Result { try next.validateFolder() }
             DispatchQueue.main.async { [weak self] in
                 guard let self = self else { return }
-                if case .failure(let error) = folderResult { self.starting = false; completion(error); return }
+                if case .failure(let error) = folderResult { self.starting = false; self.networkActivity.setListening(self.running); completion(error); return }
                 self.engine.perform(["op": "start", "config": ["id": next.id, "name": next.name, "folder": next.folder]]) { [weak self] result in
                     guard let self = self else { return }
                     self.starting = false
@@ -320,7 +323,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
                         self.identity.stringValue = "• \(next.name) / приём включён"
                         self.status.stringValue = "Готов к отправке и автоматическому приёму"; self.refreshSendButton()
                         completion(nil)
-                    case .failure(let error): self.running = false; self.status.stringValue = error.localizedDescription; completion(error)
+                    case .failure(let error): self.running = false; self.networkActivity.setListening(false); self.status.stringValue = error.localizedDescription; completion(error)
                     }
                 }
             }
@@ -366,10 +369,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
 
     private func consume(_ value: [String: Any]) {
         busy = value["busy"] as? Bool ?? false
+        networkActivity.setTransferring(busy)
         let newPeers = (value["peers"] as? [[String: Any]] ?? []).compactMap(Peer.init)
             .sorted { $0.name == $1.name ? $0.id < $1.id : $0.name.localizedStandardCompare($1.name) == .orderedAscending }
         if newPeers != peers { peers = newPeers; drawPeers() }
         for event in value["events"] as? [[String: Any]] ?? [] {
+            if event["type"] as? String == "discovery" {
+                let next = event["status"] as? String ?? "retrying"
+                if next != "active" || discoveryState != "active" {
+                    status.stringValue = event["message"] as? String ?? "Восстанавливаю поиск устройств…"
+                }
+                discoveryState = next
+            }
             if event["type"] as? String == "error" { status.stringValue = event["message"] as? String ?? "Ошибка" }
             guard let id = event["transfer"] as? String else { continue }
             if event["type"] as? String == "transfer", !rows.contains(where: { $0.id == id }) {
@@ -448,13 +459,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
     private func send(_ peer: Peer, urls: [URL]) {
         guard running, !starting, !terminating, !urls.isEmpty else { return }
         status.stringValue = "Подготовка файлов…"
+        networkActivity.setTransferring(true)
         engine.perform(["op": "send", "address": peer.address, "port": peer.port, "name": peer.name, "paths": urls.map(\.path)]) { [weak self] result in
             switch result {
             case .success:
                 self?.busy = true
                 if self?.pendingURLs == urls { self?.pendingURLs = [] }
                 self?.refreshSendButton(); self?.status.stringValue = "Передача началась"
-            case .failure(let error): self?.status.stringValue = error.localizedDescription
+            case .failure(let error):
+                self?.networkActivity.setTransferring(self?.busy ?? false)
+                self?.status.stringValue = error.localizedDescription
             }
         }
     }
@@ -509,7 +523,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
                 }
             }
             self.timer?.invalidate()
-            self.engine.perform(["op": "stop"]) { _ in NSApp.reply(toApplicationShouldTerminate: true) }
+            self.engine.perform(["op": "stop"]) { _ in self.networkActivity.stop(); NSApp.reply(toApplicationShouldTerminate: true) }
         }
         return .terminateLater
     }

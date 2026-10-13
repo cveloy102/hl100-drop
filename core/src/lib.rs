@@ -1,7 +1,7 @@
 //! HL100 Drop v1: JSON control frames and uncompressed TCP byte streams.
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
-use socket2::{Domain, Protocol, Socket, Type};
+use socket2::{Domain, Protocol, SockRef, Socket, Type};
 use std::{
     collections::{HashMap, VecDeque},
     ffi::{CStr, CString},
@@ -213,6 +213,7 @@ pub struct Engine {
     workers: Mutex<Vec<thread::JoinHandle<()>>>,
     listener_worker: Mutex<Option<thread::JoinHandle<()>>>,
     listener_port: u16,
+    discovery_port: u16,
 }
 fn frame_write(stream: &mut TcpStream, value: &impl Serialize) -> io::Result<()> {
     let bytes = serde_json::to_vec(value)?;
@@ -254,6 +255,13 @@ fn local_address(ip: std::net::IpAddr) -> bool {
 }
 impl Engine {
     pub fn start(config: Config, storage: Arc<dyn Storage>) -> io::Result<Arc<Self>> {
+        Self::start_on_discovery_port(config, storage, DISCOVERY_PORT)
+    }
+    fn start_on_discovery_port(
+        config: Config,
+        storage: Arc<dyn Storage>,
+        discovery_port: u16,
+    ) -> io::Result<Arc<Self>> {
         if config.name.trim().is_empty() || config.id.is_empty() {
             return Err(io::Error::other("Укажите имя устройства"));
         }
@@ -279,6 +287,7 @@ impl Engine {
             workers: Mutex::new(Vec::new()),
             listener_worker: Mutex::new(None),
             listener_port: port,
+            discovery_port,
         });
         let worker = e.clone();
         let handle = thread::spawn(move || {
@@ -309,22 +318,13 @@ impl Engine {
         *e.listener_worker.lock().unwrap() = Some(handle);
         let w = e.clone();
         e.spawn(move || {
-            let mut previous_error = String::new();
             while !w.stopped.load(Ordering::Relaxed) {
-                match w.discovery() {
-                    Ok(()) => break,
-                    Err(err) => {
-                        let message = format!("Обнаружение устройств: {err}");
-                        if message != previous_error {
-                            w.event(json!({"type":"error","message":message}));
-                            previous_error = message;
-                        }
-                        for _ in 0..10 {
-                            if w.stopped.load(Ordering::Relaxed) {
-                                break;
-                            }
-                            thread::sleep(Duration::from_millis(100));
-                        }
+                if let Err(err) = w.discovery() {
+                    w.event(json!({"type":"discovery","status":"retrying","message":format!("Поиск устройств: {err}. Восстанавливаю соединение…")}));
+                    // Rebuild failed sockets while keeping TCP reception alive.
+                    for _ in 0..10 {
+                        if w.stopped.load(Ordering::Relaxed) { break; }
+                        thread::sleep(Duration::from_millis(100));
                     }
                 }
             }
@@ -374,34 +374,62 @@ impl Engine {
     fn discovery(&self) -> io::Result<()> {
         let socket = Socket::new(Domain::IPV4, Type::DGRAM, Some(Protocol::UDP))?;
         socket.set_reuse_address(true)?;
-        socket.bind(&SocketAddr::from((Ipv4Addr::UNSPECIFIED, DISCOVERY_PORT)).into())?;
+        #[cfg(unix)]
+        socket.set_reuse_port(true)?;
+        socket.bind(&SocketAddr::from((Ipv4Addr::UNSPECIFIED, self.discovery_port)).into())?;
         let socket: UdpSocket = socket.into();
         socket.set_read_timeout(Some(Duration::from_millis(250)))?;
         socket.set_broadcast(true)?;
         socket.set_multicast_ttl_v4(1)?;
-        let interfaces: Vec<_> = if_addrs::get_if_addrs()?
-            .into_iter()
-            .filter_map(|i| match i.addr {
-                if_addrs::IfAddr::V4(v) if !v.ip.is_loopback() => Some(v),
-                _ => None,
-            })
-            .collect();
-        for iface in &interfaces {
-            let _ = socket.join_multicast_v4(&GROUP, &iface.ip);
-        }
+        let mut joined = std::collections::HashSet::new();
+        let mut network_available = None;
         let mut announced = Instant::now() - Duration::from_secs(3);
         let mut buffer = [0; 4096];
         while !self.stopped.load(Ordering::Relaxed) {
             if announced.elapsed() >= Duration::from_secs(2) {
+                // Wi-Fi addresses may change after login, wake or a network switch.
+                let interfaces: Vec<_> = if_addrs::get_if_addrs()?
+                    .into_iter()
+                    .filter_map(|i| match i.addr {
+                        if_addrs::IfAddr::V4(v)
+                            if !v.ip.is_loopback() && !v.ip.is_unspecified() =>
+                        {
+                            Some(v)
+                        }
+                        _ => None,
+                    })
+                    .collect();
+                let current: std::collections::HashSet<_> =
+                    interfaces.iter().map(|v| v.ip).collect();
+                for ip in joined.difference(&current) {
+                    let _ = socket.leave_multicast_v4(&GROUP, ip);
+                }
+                joined.retain(|ip| current.contains(ip));
                 let c = self.config.lock().unwrap().clone();
                 let data = serde_json::to_vec(
                     &json!({"app":"hl100-drop","protocol":1,"id":c.id,"name":c.name,"port":self.listener_port,"platform":std::env::consts::OS}),
                 )?;
-                let _ = socket.send_to(&data, (GROUP, DISCOVERY_PORT));
+                let mut sent = false;
                 for iface in &interfaces {
-                    if let Some(ip) = iface.broadcast {
-                        let _ = socket.send_to(&data, (ip, DISCOVERY_PORT));
+                    if !joined.contains(&iface.ip)
+                        && socket.join_multicast_v4(&GROUP, &iface.ip).is_ok()
+                    {
+                        joined.insert(iface.ip);
                     }
+                    // Send on each LAN interface, rather than the default (possibly VPN) route.
+                    if SockRef::from(&socket)
+                        .set_multicast_if_v4(&iface.ip)
+                        .is_ok()
+                    {
+                        sent |= socket.send_to(&data, (GROUP, self.discovery_port)).is_ok();
+                    }
+                    if let Some(ip) = iface.broadcast {
+                        sent |= socket.send_to(&data, (ip, self.discovery_port)).is_ok();
+                    }
+                }
+                if network_available != Some(sent) {
+                    self.event(json!({"type":"discovery","status":if sent {"active"} else {"waiting"},"message":if sent {"Поиск устройств включён"} else {"Нет доступной локальной сети. Ожидаю подключение…"}}));
+                    network_available = Some(sent);
                 }
                 announced = Instant::now();
             }
@@ -493,7 +521,10 @@ impl Engine {
                         check_cancel(&cancel)?;
                         let n=file.read(&mut buffer[..remaining.min(BUFFER as u64) as usize])?;
                         if n==0 { return Err(io::Error::other("Исходный файл изменился или стал недоступен")); }
-                        stream.write_all(&buffer[..n])?; remaining-=n as u64; done+=n as u64;
+                        if let Err(error) = stream.write_all(&buffer[..n]) {
+                            return Err(receiver_failure(&mut stream, error));
+                        }
+                        remaining-=n as u64; done+=n as u64;
                         if update.elapsed()>=Duration::from_millis(150) { w.progress(&transfer,done,total,started); update=Instant::now(); }
                     }
                     let ack:Value=frame_read(&mut stream)?; if ack["ok"]!=true { return Err(io::Error::other(ack["error"].as_str().unwrap_or("Ошибка сохранения"))); }
@@ -594,6 +625,22 @@ impl Engine {
         self.transfers.lock().unwrap().remove(id);
         self.event(json!({"type":"complete","transfer":id,"status":if cancelled {"cancelled"} else if result.is_ok() {"done"} else {"error"},"message":result.err().map(|e|e.to_string()).unwrap_or_default()}));
     }
+}
+// A receiver can reject storage while the sender is still streaming a large
+// file. Read its queued control error before reporting a generic Broken pipe.
+fn receiver_failure(stream: &mut TcpStream, transport: io::Error) -> io::Error {
+    let _ = stream.set_read_timeout(Some(Duration::from_secs(1)));
+    if let Ok(reply) = frame_read::<Value>(stream) {
+        if reply["ok"] == false {
+            if let Some(message) = reply["error"].as_str() {
+                return io::Error::other(format!("Получатель прервал передачу: {message}"));
+            }
+        }
+    }
+    io::Error::new(
+        transport.kind(),
+        format!("Соединение с получателем прервано: {transport}"),
+    )
 }
 fn setup_stream(stream: &TcpStream) -> io::Result<()> {
     // Accepted sockets can inherit the listener's nonblocking mode on Windows.
@@ -872,6 +919,118 @@ mod tests {
         assert_eq!(timeout.unwrap_err().kind(), io::ErrorKind::TimedOut);
     }
     use super::*;
+    #[test]
+    fn discovery_recovers_when_udp_port_becomes_available() {
+        let blocker = UdpSocket::bind((Ipv4Addr::UNSPECIFIED, 0)).unwrap();
+        let port = blocker.local_addr().unwrap().port();
+        let engine = Engine::start_on_discovery_port(
+            Config {
+                id: "retry-test".into(),
+                name: "Retry".into(),
+                folder: "unused".into(),
+                port: 0,
+            },
+            Arc::new(DiskStorage::new("unused")),
+            port,
+        )
+        .unwrap();
+        let deadline = Instant::now() + Duration::from_secs(3);
+        let mut retrying = false;
+        while Instant::now() < deadline {
+            let state = engine.poll();
+            if state["events"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|e| e["type"] == "discovery" && e["status"] == "retrying")
+            {
+                retrying = true;
+                break;
+            }
+            thread::sleep(Duration::from_millis(20));
+        }
+        assert!(retrying, "bind failure must be reported and retried");
+        drop(blocker);
+        let probe = UdpSocket::bind((Ipv4Addr::LOCALHOST, 0)).unwrap();
+        let announce = serde_json::to_vec(&json!({"app":"hl100-drop","protocol":1,"id":"recovered-peer","name":"Peer","port":41000,"platform":"windows"})).unwrap();
+        let deadline = Instant::now() + Duration::from_secs(5);
+        let mut found = false;
+        while Instant::now() < deadline {
+            probe
+                .send_to(&announce, (Ipv4Addr::LOCALHOST, port))
+                .unwrap();
+            if engine.poll()["peers"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|p| p["id"] == "recovered-peer")
+            {
+                found = true;
+                break;
+            }
+            thread::sleep(Duration::from_millis(50));
+        }
+        engine.stop();
+        assert!(
+            found,
+            "discovery must recover without restarting the engine"
+        );
+    }
+    #[test]
+    fn discovery_socket_can_be_shared_by_two_local_peers() {
+        let probe = UdpSocket::bind((Ipv4Addr::LOCALHOST, 0)).unwrap();
+        let port = probe.local_addr().unwrap().port();
+        drop(probe);
+        let make = |id: &str| {
+            Engine::start_on_discovery_port(
+                Config {
+                    id: id.into(),
+                    name: id.into(),
+                    folder: "unused".into(),
+                    port: 0,
+                },
+                Arc::new(DiskStorage::new("unused")),
+                port,
+            )
+            .unwrap()
+        };
+        let a = make("shared-a");
+        let b = make("shared-b");
+        let mut ready = [false; 2];
+        let deadline = Instant::now() + Duration::from_secs(3);
+        while Instant::now() < deadline && !ready.iter().all(|v| *v) {
+            for (index, e) in [&a, &b].iter().enumerate() {
+                for event in e.poll()["events"].as_array().unwrap() {
+                    if event["type"] == "discovery"
+                        && (event["status"] == "active" || event["status"] == "waiting")
+                    {
+                        ready[index] = true;
+                    }
+                }
+            }
+            thread::sleep(Duration::from_millis(20));
+        }
+        a.stop();
+        b.stop();
+        assert_eq!(ready, [true, true]);
+    }
+    #[test]
+    fn receiver_storage_error_survives_sender_broken_pipe() {
+        let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            frame_write(
+                &mut stream,
+                &json!({"ok":false,"error":"Нет места на диске получателя"}),
+            )
+            .unwrap();
+        });
+        let mut stream = TcpStream::connect(address).unwrap();
+        let error = receiver_failure(&mut stream, io::Error::from(io::ErrorKind::BrokenPipe));
+        assert!(error.to_string().contains("Нет места на диске получателя"));
+        server.join().unwrap();
+    }
     #[test]
     fn rejects_unsafe_paths() {
         for p in ["../a", "/etc/x", "a/../x", "a\\b", "C:/x", "a//b", "a/./b"] {
