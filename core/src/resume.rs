@@ -804,7 +804,8 @@ mod tests {
             if manual_pause {
                 release_rx.recv().unwrap();
             }
-            socket.shutdown(Shutdown::Both).unwrap();
+            // macOS reports ENOTCONN if manual pause already closed the peer.
+            let _ = socket.shutdown(Shutdown::Both);
             drop(socket);
             let (mut socket, _) = listener.accept().unwrap();
             setup_stream(&socket).unwrap();

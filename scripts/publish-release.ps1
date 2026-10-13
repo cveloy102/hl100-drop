@@ -2,6 +2,8 @@ param([string]$Version = '1.1.0', [switch]$Stable)
 . "$PSScriptRoot/environment.ps1"
 $taskRepo = 'cveloy102/hl100-drop'
 $taskFiles = @("HL100DropSetup-$Version.exe", "HL100Drop-$Version.apk")
+$taskMacFile = "HL100Drop-$Version-universal.dmg"
+if (Test-Path -LiteralPath (Join-Path $taskRoot "artifacts/$taskMacFile")) { $taskFiles += $taskMacFile }
 foreach ($taskFile in $taskFiles) { if (!(Test-Path (Join-Path $taskRoot "artifacts/$taskFile"))) { throw "Missing release asset: $taskFile" } }
 $taskChecksums = foreach ($taskFile in $taskFiles) {
     $taskHash = (Get-FileHash -Algorithm SHA256 -LiteralPath (Join-Path $taskRoot "artifacts/$taskFile")).Hash.ToLowerInvariant()
