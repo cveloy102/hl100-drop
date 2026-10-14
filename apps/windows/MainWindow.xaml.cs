@@ -34,7 +34,11 @@ public partial class MainWindow : Window {
         tray.DoubleClick+=(_,_)=>Dispatcher.Invoke(()=>{Show();WindowState=WindowState.Normal;Activate();});
         var menu=new System.Windows.Forms.ContextMenuStrip();menu.Items.Add("Открыть",null,(_,_)=>Dispatcher.Invoke(()=>{Show();Activate();}));menu.Items.Add("Выход",null,(_,_)=>Dispatcher.Invoke(Exit));tray.ContextMenuStrip=menu;
         timer.Tick+=async(_,_)=>await Poll();
-        Loaded+=async(_,_)=>{if(!settings.Configured){ShowSettingsPage(true);return;}if(Environment.GetCommandLineArgs().Contains("--login"))Hide();await Start();if(settings.CheckUpdates)await CheckUpdate(false);};
+    }
+    public bool IsConfigured => settings.Configured;
+    public async Task InitializeAsync() {
+        if(!settings.Configured){ShowSettingsPage(true);return;}
+        await Start();if(settings.CheckUpdates)await CheckUpdate(false);
     }
     private async Task Start() {
         try {var result=await Task.Run(()=>Native.Call(new{op="start",config=new{id=settings.Id,name=settings.Name,folder=settings.Folder}}));Native.Check(result);running=true;Identity.Text=$"{settings.Name} / ПРИЁМ: {settings.Folder}";Status.Text="Готов к отправке и автоматическому приёму";timer.Start();}

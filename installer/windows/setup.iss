@@ -1,5 +1,5 @@
 #ifndef AppVersion
-  #define AppVersion "1.1.1"
+  #define AppVersion "1.1.2"
 #endif
 #ifndef PublishDir
   #define PublishDir "..\..\artifacts\windows"
@@ -39,3 +39,11 @@ Name: "{autodesktop}\HL100 Drop"; Filename: "{app}\HL100Drop.exe"; Tasks: deskto
 Filename: "{app}\HL100Drop.exe"; Description: "Запустить HL100 Drop"; Flags: nowait postinstall skipifsilent
 [Registry]
 Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; ValueName: "HL100Drop"; Flags: uninsdeletevalue
+
+; Preserve the user's choice while moving an old portable autostart to this installation.
+Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; ValueName: "HL100Drop"; ValueType: string; ValueData: """{app}\HL100Drop.exe"" --login"; Check: AutostartEnabled
+[Code]
+function AutostartEnabled: Boolean;
+begin
+  Result := RegValueExists(HKCU, 'Software\Microsoft\Windows\CurrentVersion\Run', 'HL100Drop');
+end;
