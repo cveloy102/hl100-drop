@@ -1,7 +1,7 @@
 name: Сайт DROP
 on:
   push:
-    branches: [codex/initial-implementation]
+    branches: [main]
     paths: ['site/**', 'docs/images/**', '.github/workflows/pages.yml']
   workflow_dispatch:
 permissions:
