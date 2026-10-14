@@ -48,6 +48,9 @@ jobs:
       - run: cargo build --release --locked
       - shell: pwsh
         run: ./scripts/build-windows.ps1
+      - name: Проверка запуска в трей и повторного открытия
+        shell: pwsh
+        run: ./scripts/test-windows-startup.ps1
       - uses: actions/upload-artifact@v4
         with:
           name: windows-installer
