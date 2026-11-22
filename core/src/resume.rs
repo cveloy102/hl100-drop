@@ -115,6 +115,16 @@ impl Engine {
     fn transfer_end(&self, control: &Control, status: &str, message: &str) {
         self.state(control, status, message);
         let record = control.record.lock().unwrap();
+        if status == "done" {
+            // A finished transfer needs no journal. The in-memory record still
+            // answers a repeated offer whose final acknowledgement was lost.
+            if let Ok(path) = self.record_path(&record.id) {
+                let _ = fs::remove_file(path);
+            }
+            if record.direction == "receive" {
+                self.storage.forget(&record.id);
+            }
+        }
         self.event(
             json!({"type":"complete","transfer":record.id,"status":status,"message":message}),
         );
@@ -176,10 +186,12 @@ impl Engine {
         let Some(root) = self.storage.state_root() else {
             return;
         };
-        let Ok(files) = fs::read_dir(root.join("jobs")) else {
-            return;
-        };
-        for item in files.flatten() {
+        let mut live = HashSet::new();
+        for item in fs::read_dir(root.join("jobs"))
+            .into_iter()
+            .flatten()
+            .flatten()
+        {
             if item.path().extension().and_then(|s| s.to_str()) != Some("json") {
                 continue;
             }
@@ -195,7 +207,25 @@ impl Engine {
             {
                 continue;
             }
-            if record.status == "done" || (record.status == "cancelled" && !record.cancel_pending) {
+            // A receiver keeps a cancellation so a sender that was offline learns
+            // about it later; after a week the sender has long given up.
+            let stale = item
+                .metadata()
+                .and_then(|m| m.modified())
+                .ok()
+                .and_then(|m| m.elapsed().ok())
+                .is_some_and(|age| age > Duration::from_secs(7 * 24 * 3600));
+            let finished = match record.status.as_str() {
+                "done" | "error" => true,
+                "cancelled" => !record.cancel_pending && (record.direction == "send" || stale),
+                _ => false,
+            };
+            if finished {
+                let _ = fs::remove_file(item.path());
+                continue;
+            }
+            live.insert(record.id.clone());
+            if record.status == "cancelled" && !record.cancel_pending {
                 continue;
             }
             let sender = record.direction == "send";
@@ -235,14 +265,11 @@ impl Engine {
             }
             if sender && sources.len() == control.record.lock().unwrap().entries.len() {
                 let engine = self.clone();
-                if !control.paused.load(Ordering::Relaxed)
-                    && !control.cancelled.load(Ordering::Relaxed)
-                {
-                    control.active.store(true, Ordering::Relaxed);
-                }
                 self.spawn_resume(move || engine.send_loop(control, sources));
             }
         }
+        // Forget name reservations of transfers that can no longer continue.
+        self.storage.retain(&live);
     }
     pub(super) fn send_resumable(
         self: &Arc<Self>,
@@ -283,7 +310,6 @@ impl Engine {
             .lock()
             .unwrap()
             .insert(id.clone(), control.clone());
-        control.active.store(true, Ordering::Relaxed);
         let engine = self.clone();
         self.spawn_resume(move || engine.send_loop(control, sources));
         Ok(id)
@@ -300,7 +326,8 @@ impl Engine {
                     break;
                 }
             } else if !control.paused.load(Ordering::Relaxed) {
-                control.active.store(true, Ordering::Relaxed);
+                // `active` is raised inside the attempt once the receiver accepts:
+                // waiting for an absent device is not busy I/O.
                 let result = self.send_attempt(&control, &mut sources);
                 control.detach();
                 if self.stopped.load(Ordering::Relaxed) {
@@ -441,6 +468,7 @@ impl Engine {
         }
         control.record.lock().unwrap().negotiated = negotiated;
         self.check_control(control)?;
+        control.active.store(true, Ordering::Relaxed);
         self.state(control, "active", "");
         self.save_control(control)?;
         // One offset per file at connection setup; no block acknowledgements.
@@ -565,6 +593,22 @@ impl Engine {
         if record.peer_id != offer.id || record.entries != offer.entries {
             return Err(io::Error::other("Содержимое передачи изменилось"));
         }
+        if record.status == "done" {
+            // The sender missed the final acknowledgement: confirm again, store nothing.
+            if offer.action == "cancel" {
+                return frame_write(&mut stream, &json!({"ok":true,"resume":true}));
+            }
+            let offsets = offer
+                .entries
+                .iter()
+                .map(|e| (e.size, true))
+                .collect::<Vec<_>>();
+            frame_write(
+                &mut stream,
+                &json!({"ok":true,"resume":true,"id":self.config.lock().unwrap().id,"offsets":offsets}),
+            )?;
+            return frame_write(&mut stream, &json!({"ok":true}));
+        }
         if offer.action == "cancel" {
             control.cancelled.store(true, Ordering::Relaxed);
             control.disconnect();
@@ -641,7 +685,10 @@ impl Engine {
                 let out = file
                     .as_mut()
                     .ok_or_else(|| io::Error::other("Не удалось открыть файл"))?;
-                out.seek(SeekFrom::Start(*offset))?;
+                // Some Android providers hand out pipes; only seek when continuing.
+                if *offset > 0 {
+                    out.seek(SeekFrom::Start(*offset))?;
+                }
                 let mut remaining = entry.size - offset;
                 while remaining > 0 {
                     self.check_control(&control)?;
@@ -994,6 +1041,124 @@ mod tests {
         assert_eq!(reply["status"], "cancelled");
         drop(socket);
         receiver.stop();
+        fs::remove_dir_all(root).unwrap();
+    }
+    fn single(id: &str, name: &str) -> Offer {
+        let mut offered = offer(id);
+        offered.entries = vec![Entry {
+            path: name.into(),
+            size: 3,
+            directory: false,
+        }];
+        offered
+    }
+    fn receive_all(receiver: &Engine, offered: &Offer, data: &[u8]) {
+        let (mut socket, reply) = connect(receiver, offered);
+        assert_eq!(reply["resume"], true, "{reply}");
+        socket.write_all(data).unwrap();
+        assert_eq!(frame_read::<Value>(&mut socket).unwrap()["ok"], true);
+        assert_eq!(frame_read::<Value>(&mut socket).unwrap()["ok"], true);
+        drop(socket);
+        wait_idle(receiver);
+    }
+    #[test]
+    fn finished_receive_releases_name_and_journal() {
+        let root = std::env::temp_dir().join(format!("drop-release-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&root);
+        let receiver = Engine::start(config(&root), Arc::new(DiskStorage::new(&root))).unwrap();
+        receive_all(&receiver, &single("release-one", "photo.txt"), b"abc");
+        assert_eq!(fs::read(root.join("photo.txt")).unwrap(), b"abc");
+        fs::remove_file(root.join("photo.txt")).unwrap();
+        receive_all(&receiver, &single("release-two", "photo.txt"), b"def");
+        // The deleted name is free again; nothing accumulates in the journal.
+        assert_eq!(fs::read(root.join("photo.txt")).unwrap(), b"def");
+        assert!(!root.join("photo (1).txt").exists());
+        assert_eq!(
+            fs::read_dir(root.join(".drop-state/jobs")).unwrap().count(),
+            0
+        );
+        assert_eq!(
+            fs::read_to_string(root.join(".drop-state/storage.json")).unwrap(),
+            "{}"
+        );
+        receiver.stop();
+        fs::remove_dir_all(root).unwrap();
+    }
+    #[test]
+    fn repeated_offer_after_done_is_confirmed_without_a_copy() {
+        let root = std::env::temp_dir().join(format!("drop-repeat-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&root);
+        let receiver = Engine::start(config(&root), Arc::new(DiskStorage::new(&root))).unwrap();
+        let offered = single("repeat", "photo.txt");
+        receive_all(&receiver, &offered, b"abc");
+        let (mut socket, reply) = connect(&receiver, &offered);
+        assert_eq!(reply["offsets"], json!([[3, true]]));
+        assert_eq!(frame_read::<Value>(&mut socket).unwrap()["ok"], true);
+        drop(socket);
+        wait_idle(&receiver);
+        assert!(!root.join("photo (1).txt").exists());
+        receiver.stop();
+        fs::remove_dir_all(root).unwrap();
+    }
+    #[test]
+    fn failed_and_finished_records_are_not_restored() {
+        let root = std::env::temp_dir().join(format!("drop-zombie-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&root);
+        let jobs = root.join(".drop-state/jobs");
+        fs::create_dir_all(&jobs).unwrap();
+        for status in ["error", "done", "waiting"] {
+            let record = Record {
+                id: format!("rx-{status}"),
+                wire_id: status.into(),
+                direction: "receive".into(),
+                name: "Sender".into(),
+                peer_id: "sender".into(),
+                address: SocketAddr::from((Ipv4Addr::LOCALHOST, 1)),
+                entries: offer(status).entries,
+                sources: Vec::new(),
+                status: status.into(),
+                negotiated: true,
+                cancel_pending: false,
+            };
+            save_json(&jobs.join(format!("rx-{status}.json")), &record).unwrap();
+        }
+        let receiver = Engine::start(config(&root), Arc::new(DiskStorage::new(&root))).unwrap();
+        let restored = receiver
+            .resumed
+            .lock()
+            .unwrap()
+            .keys()
+            .cloned()
+            .collect::<Vec<_>>();
+        assert_eq!(restored, vec!["rx-waiting".to_string()]);
+        assert!(!jobs.join("rx-error.json").exists());
+        assert!(!jobs.join("rx-done.json").exists());
+        receiver.stop();
+        fs::remove_dir_all(root).unwrap();
+    }
+    #[test]
+    fn waiting_for_a_silent_receiver_is_not_busy() {
+        let root = std::env::temp_dir().join(format!("drop-silent-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&root);
+        fs::create_dir_all(&root).unwrap();
+        fs::write(root.join("a.txt"), b"data").unwrap();
+        // Accepts the connection but never answers the offer.
+        let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).unwrap();
+        let address = listener.local_addr().unwrap();
+        let hold = thread::spawn(move || listener.accept().map(|(socket, _)| socket));
+        let sender = Engine::start(config(&root), Arc::new(DiskStorage::new(&root))).unwrap();
+        sender
+            .send(
+                address,
+                "Silent".into(),
+                collect_paths(&[root.join("a.txt").to_string_lossy().into()]).unwrap(),
+            )
+            .unwrap();
+        let socket = hold.join().unwrap().unwrap();
+        thread::sleep(Duration::from_millis(300));
+        assert!(!sender.busy(), "settings and updates must not be blocked");
+        drop(socket);
+        sender.stop();
         fs::remove_dir_all(root).unwrap();
     }
 }

@@ -160,6 +160,21 @@ impl Storage for AndroidStorage {
         java_result(&mut env, result)?;
         Ok(())
     }
+    fn retain(&self, live: &HashSet<String>) {
+        let Ok(mut env) = self.vm.attach_current_thread() else {
+            return;
+        };
+        let Ok(ids) = env.new_string(json!(live).to_string()) else {
+            return;
+        };
+        let result = env.call_method(
+            self.bridge.as_obj(),
+            "retainTransfers",
+            "(Ljava/lang/String;)V",
+            &[JValue::Object(&ids)],
+        );
+        let _ = java_result(&mut env, result);
+    }
     fn abort(&self, t: &str) {
         if let Ok(mut env) = self.vm.attach_current_thread() {
             if let Ok(t) = env.new_string(t) {
@@ -202,10 +217,7 @@ pub extern "system" fn Java_ru_hl100_drop_NativeBridge_command(
                 Ok(json!({"ok":true}))
             }
             "send" => {
-                let guard = registry().lock().unwrap();
-                let e = guard
-                    .as_ref()
-                    .ok_or_else(|| io::Error::other("Устройство не настроено"))?;
+                let e = current_engine()?;
                 let storage = Arc::new(AndroidStorage {
                     vm: env.get_java_vm().map_err(io::Error::other)?,
                     bridge: env.new_global_ref(&bridge).map_err(io::Error::other)?,

@@ -3,7 +3,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use socket2::{Domain, Protocol, Socket, Type};
 use std::{
-    collections::{HashMap, VecDeque},
+    collections::{HashMap, HashSet, VecDeque},
     ffi::{CStr, CString},
     fs::{self, File, OpenOptions},
     io::{self, Read, Seek, SeekFrom, Write},
@@ -131,6 +131,12 @@ pub trait Storage: Send + Sync {
     fn resume_offset(&self, _transfer: &str, _entry: &Entry) -> io::Result<(u64, bool)> {
         Err(io::Error::other("Хранилище не поддерживает возобновление"))
     }
+    /// Drop bookkeeping for a finished transfer without touching received files.
+    fn forget(&self, transfer: &str) {
+        self.abort(transfer)
+    }
+    /// Drop bookkeeping for every transfer that is no longer restorable.
+    fn retain(&self, _live: &HashSet<String>) {}
 }
 pub struct DiskStorage {
     root: PathBuf,
@@ -148,12 +154,133 @@ impl DiskStorage {
             paths: Mutex::new(paths),
         }
     }
+    // Only root-name reservations are durable: every file and part path is
+    // derived from them, so the journal does not grow with the file count.
     fn save_paths(&self, paths: &HashMap<String, (PathBuf, PathBuf)>) -> io::Result<()> {
-        resume::save_json(&self.root.join(".drop-state/storage.json"), paths)
+        let roots = paths
+            .iter()
+            .filter(|(k, _)| k.contains(":@/"))
+            .collect::<HashMap<_, _>>();
+        resume::save_json(&self.root.join(".drop-state/storage.json"), &roots)
+    }
+    fn reserve(
+        &self,
+        paths: &mut HashMap<String, (PathBuf, PathBuf)>,
+        transfer: &str,
+        top: &str,
+    ) -> io::Result<PathBuf> {
+        let root_key = key(transfer, &format!("@/{top}"));
+        if let Some((_, chosen)) = paths.get(&root_key) {
+            return Ok(chosen.clone());
+        }
+        let local = local_component(top, cfg!(windows));
+        let p = Path::new(&local);
+        let stem = p.file_stem().unwrap_or_default().to_string_lossy();
+        let ext = p
+            .extension()
+            .map(|e| format!(".{}", e.to_string_lossy()))
+            .unwrap_or_default();
+        let mut chosen = self.root.join(&local);
+        let mut n = 1;
+        while chosen.exists() || paths.values().any(|(_, p)| p == &chosen) {
+            chosen = self.root.join(format!("{stem} ({n}){ext}"));
+            n += 1;
+        }
+        paths.insert(root_key, (PathBuf::new(), chosen.clone()));
+        self.save_paths(paths)?;
+        Ok(chosen)
+    }
+    fn target(
+        paths: &HashMap<String, (PathBuf, PathBuf)>,
+        transfer: &str,
+        relative: &Path,
+    ) -> Option<PathBuf> {
+        let (_, chosen) = paths.get(&key(transfer, &format!("@/{}", first_component(relative))))?;
+        Some(join_tail(chosen, relative))
     }
 }
 fn key(transfer: &str, path: &str) -> String {
     format!("{transfer}:{path}")
+}
+fn transfer_of(key: &str) -> &str {
+    key.split_once(':').map_or(key, |(transfer, _)| transfer)
+}
+/// Map one wire path component to a name the local file system accepts.
+/// Windows rejects names that are valid on macOS and Android.
+fn local_component(name: &str, windows: bool) -> String {
+    if !windows {
+        return name.to_string();
+    }
+    let mut out: String = name
+        .chars()
+        .map(|c| {
+            if c < ' ' || "<>:\"|?*".contains(c) {
+                '_'
+            } else {
+                c
+            }
+        })
+        .collect();
+    let trimmed = out.trim_end_matches(['.', ' ']);
+    if trimmed.len() != out.len() {
+        out = format!("{trimmed}_");
+    }
+    let stem = out
+        .split('.')
+        .next()
+        .unwrap_or_default()
+        .trim_end()
+        .to_ascii_uppercase();
+    let reserved = matches!(stem.as_str(), "CON" | "PRN" | "AUX" | "NUL")
+        || (stem.len() == 4
+            && (stem.starts_with("COM") || stem.starts_with("LPT"))
+            && matches!(stem.as_bytes()[3], b'1'..=b'9'));
+    if reserved {
+        out.insert(0, '_');
+    }
+    out
+}
+fn first_component(relative: &Path) -> String {
+    relative
+        .components()
+        .next()
+        .map(|c| c.as_os_str().to_string_lossy().to_string())
+        .unwrap_or_default()
+}
+fn join_tail(chosen: &Path, relative: &Path) -> PathBuf {
+    let mut target = chosen.to_path_buf();
+    for component in relative.components().skip(1) {
+        target.push(local_component(
+            &component.as_os_str().to_string_lossy(),
+            cfg!(windows),
+        ));
+    }
+    target
+}
+fn part_path(target: &Path, transfer: &str) -> PathBuf {
+    target.with_file_name(format!(
+        "{}.{}.part",
+        target.file_name().unwrap_or_default().to_string_lossy(),
+        transfer
+    ))
+}
+fn remove_parts(root: &Path, transfer: &str) {
+    if !fs::symlink_metadata(root).is_ok_and(|meta| meta.is_dir()) {
+        let _ = fs::remove_file(part_path(root, transfer));
+        return;
+    }
+    let suffix = format!(".{transfer}.part");
+    let Ok(items) = fs::read_dir(root) else {
+        return;
+    };
+    for item in items.flatten() {
+        let path = item.path();
+        if item.file_type().is_ok_and(|t| t.is_dir()) {
+            remove_parts(&path, transfer);
+        } else if item.file_name().to_string_lossy().ends_with(&suffix) {
+            let _ = fs::remove_file(path);
+        }
+    }
 }
 fn valid_path(path: &str) -> io::Result<PathBuf> {
     if path.is_empty() || path.contains('\\') || path.contains(':') || path.contains('\0') {
@@ -173,97 +300,63 @@ impl Storage for DiskStorage {
     fn open(&self, transfer: &str, entry: &Entry) -> io::Result<Option<File>> {
         let relative = valid_path(&entry.path)?;
         fs::create_dir_all(&self.root)?;
-        // Resolve one collision-free top-level name for the entire offered tree.
         let mut paths = self.paths.lock().unwrap();
-        if !entry.directory {
-            if let Some((temp, _)) = paths.get(&key(transfer, &entry.path)) {
-                if !temp.as_os_str().is_empty() && temp.exists() {
-                    return Ok(Some(OpenOptions::new().read(true).write(true).open(temp)?));
-                }
-            }
-        }
-        let top = relative
-            .components()
-            .next()
-            .unwrap()
-            .as_os_str()
-            .to_string_lossy()
-            .to_string();
-        let root_key = key(transfer, &format!("@/{top}"));
-        let chosen = if let Some((_, chosen)) = paths.get(&root_key) {
-            chosen.clone()
-        } else {
-            let base = self.root.join(&top);
-            let mut chosen = base.clone();
-            let mut n = 1;
-            while chosen.exists() || paths.values().any(|(_, p)| p == &chosen) {
-                let p = Path::new(&top);
-                let stem = p.file_stem().unwrap_or_default().to_string_lossy();
-                let ext = p
-                    .extension()
-                    .map(|e| format!(".{}", e.to_string_lossy()))
-                    .unwrap_or_default();
-                chosen = self.root.join(format!("{stem} ({n}){ext}"));
-                n += 1;
-            }
-            paths.insert(root_key, (PathBuf::new(), chosen.clone()));
-            chosen
-        };
-        let tail: PathBuf = relative.components().skip(1).collect();
-        let target = if tail.as_os_str().is_empty() {
-            chosen
-        } else {
-            chosen.join(tail)
-        };
+        // Resolve one collision-free top-level name for the entire offered tree.
+        let chosen = self.reserve(&mut paths, transfer, &first_component(&relative))?;
+        let target = join_tail(&chosen, &relative);
         if entry.directory {
             fs::create_dir_all(target)?;
-            self.save_paths(&paths)?;
             return Ok(None);
         }
         fs::create_dir_all(target.parent().unwrap())?;
-        let temp = target.with_file_name(format!(
-            "{}.{}.part",
-            target.file_name().unwrap().to_string_lossy(),
-            transfer
-        ));
-        let file = OpenOptions::new()
-            .read(true)
-            .write(true)
-            .create_new(true)
-            .open(&temp)?;
+        let temp = part_path(&target, transfer);
+        let file = if temp.exists() {
+            OpenOptions::new().read(true).write(true).open(&temp)?
+        } else {
+            OpenOptions::new()
+                .read(true)
+                .write(true)
+                .create_new(true)
+                .open(&temp)?
+        };
         paths.insert(key(transfer, &entry.path), (temp, target));
-        self.save_paths(&paths)?;
         Ok(Some(file))
     }
     fn local_path(&self, transfer: &str, entry: &Entry) -> Option<PathBuf> {
         let relative = valid_path(&entry.path).ok()?;
-        let top = relative.components().next()?.as_os_str().to_string_lossy();
-        let paths = self.paths.lock().unwrap();
-        let (_, chosen) = paths.get(&key(transfer, &format!("@/{top}")))?;
-        let tail = relative.components().skip(1).collect::<PathBuf>();
-        Some(if tail.as_os_str().is_empty() {
-            chosen.clone()
-        } else {
-            chosen.join(tail)
-        })
+        Self::target(&self.paths.lock().unwrap(), transfer, &relative)
     }
     fn finish(&self, transfer: &str, entry: &Entry) -> io::Result<()> {
         if entry.directory {
             return Ok(());
         }
         let mut paths = self.paths.lock().unwrap();
-        if let Some((temp, target)) = paths.get(&key(transfer, &entry.path)) {
-            fs::rename(temp, target)?;
+        let k = key(transfer, &entry.path);
+        if let Some((temp, target)) = paths.get(&k).cloned() {
+            if !temp.as_os_str().is_empty() {
+                // Two wire names can map to one local name; never replace one with the other.
+                if target.exists() {
+                    return Err(io::Error::other(format!(
+                        "Файл {} уже получен под этим именем",
+                        target.file_name().unwrap_or_default().to_string_lossy()
+                    )));
+                }
+                fs::rename(temp, target)?;
+            }
         }
-        if let Some((temp, _)) = paths.get_mut(&key(transfer, &entry.path)) {
+        if let Some((temp, _)) = paths.get_mut(&k) {
             *temp = PathBuf::new();
         }
-        self.save_paths(&paths)?;
         Ok(())
     }
     fn abort(&self, transfer: &str) {
         let mut paths = self.paths.lock().unwrap();
         let prefix = format!("{transfer}:");
+        let roots = paths
+            .iter()
+            .filter(|(k, _)| k.starts_with(&prefix) && k[prefix.len()..].starts_with("@/"))
+            .map(|(_, (_, chosen))| chosen.clone())
+            .collect::<Vec<_>>();
         paths.retain(|k, (temp, _)| {
             if k.starts_with(&prefix) {
                 if !temp.as_os_str().is_empty() {
@@ -274,7 +367,25 @@ impl Storage for DiskStorage {
                 true
             }
         });
+        // Part files of a restored transfer are not in memory; derive them.
+        for root in roots {
+            remove_parts(&root, transfer);
+        }
         let _ = self.save_paths(&paths);
+    }
+    fn forget(&self, transfer: &str) {
+        let mut paths = self.paths.lock().unwrap();
+        let prefix = format!("{transfer}:");
+        paths.retain(|k, _| !k.starts_with(&prefix));
+        let _ = self.save_paths(&paths);
+    }
+    fn retain(&self, live: &HashSet<String>) {
+        let mut paths = self.paths.lock().unwrap();
+        let before = paths.len();
+        paths.retain(|k, _| live.contains(transfer_of(k)));
+        if paths.len() != before {
+            let _ = self.save_paths(&paths);
+        }
     }
     fn state_root(&self) -> Option<PathBuf> {
         Some(self.root.join(".drop-state"))
@@ -283,21 +394,25 @@ impl Storage for DiskStorage {
         if entry.directory {
             return Ok((0, false));
         }
+        let relative = valid_path(&entry.path)?;
         let paths = self.paths.lock().unwrap();
-        if let Some((temp, target)) = paths.get(&key(transfer, &entry.path)) {
-            if temp.as_os_str().is_empty() || (!temp.exists() && target.exists()) {
-                if fs::metadata(target)?.len() != entry.size {
-                    return Err(io::Error::other("Полученный файл изменился"));
-                }
-                return Ok((entry.size, true));
+        // A reserved root did not exist when it was chosen, so anything under it is ours.
+        let Some(target) = Self::target(&paths, transfer, &relative) else {
+            return Ok((0, false));
+        };
+        let temp = part_path(&target, transfer);
+        if temp.exists() {
+            let length = fs::metadata(temp)?.len();
+            if length > entry.size {
+                return Err(io::Error::other("Повреждён незавершённый файл"));
             }
-            if temp.exists() {
-                let length = fs::metadata(temp)?.len();
-                if length > entry.size {
-                    return Err(io::Error::other("Повреждён незавершённый файл"));
-                }
-                return Ok((length, false));
+            return Ok((length, false));
+        }
+        if target.exists() {
+            if fs::metadata(target)?.len() != entry.size {
+                return Err(io::Error::other("Полученный файл изменился"));
             }
+            return Ok((entry.size, true));
         }
         Ok((0, false))
     }
@@ -335,24 +450,29 @@ fn frame_read<T: for<'a> Deserialize<'a>>(stream: &mut TcpStream) -> io::Result<
     stream.read_exact(&mut data)?;
     Ok(serde_json::from_slice(&data)?)
 }
-fn local_address(ip: std::net::IpAddr) -> bool {
+fn ipv4_interfaces() -> io::Result<Vec<if_addrs::Ifv4Addr>> {
+    Ok(if_addrs::get_if_addrs()?
+        .into_iter()
+        .filter_map(|i| match i.addr {
+            if_addrs::IfAddr::V4(v) if !v.ip.is_loopback() => Some(v),
+            _ => None,
+        })
+        .collect())
+}
+fn in_subnet(ip: std::net::IpAddr, interfaces: &[if_addrs::Ifv4Addr]) -> bool {
     match ip {
         std::net::IpAddr::V4(ip) => {
             ip.is_loopback()
-                || if_addrs::get_if_addrs()
-                    .unwrap_or_default()
-                    .iter()
-                    .any(|iface| {
-                        if let if_addrs::IfAddr::V4(v4) = &iface.addr {
-                            (u32::from(ip) & u32::from(v4.netmask))
-                                == (u32::from(v4.ip) & u32::from(v4.netmask))
-                        } else {
-                            false
-                        }
-                    })
+                || interfaces.iter().any(|v4| {
+                    (u32::from(ip) & u32::from(v4.netmask))
+                        == (u32::from(v4.ip) & u32::from(v4.netmask))
+                })
         }
         _ => false,
     }
+}
+fn local_address(ip: std::net::IpAddr) -> bool {
+    in_subnet(ip, &ipv4_interfaces().unwrap_or_default())
 }
 impl Engine {
     pub fn start(config: Config, storage: Arc<dyn Storage>) -> io::Result<Arc<Self>> {
@@ -508,19 +628,35 @@ impl Engine {
         socket.set_read_timeout(Some(Duration::from_millis(250)))?;
         socket.set_broadcast(true)?;
         socket.set_multicast_ttl_v4(1)?;
-        let interfaces: Vec<_> = if_addrs::get_if_addrs()?
-            .into_iter()
-            .filter_map(|i| match i.addr {
-                if_addrs::IfAddr::V4(v) if !v.ip.is_loopback() => Some(v),
-                _ => None,
-            })
-            .collect();
-        for iface in &interfaces {
-            let _ = socket.join_multicast_v4(&GROUP, &iface.ip);
-        }
+        let mut interfaces = ipv4_interfaces()?;
+        let mut joined = HashSet::new();
+        let mut refreshed = Instant::now() - Duration::from_secs(10);
         let mut announced = Instant::now() - Duration::from_secs(3);
         let mut buffer = [0; 4096];
         while !self.stopped.load(Ordering::Relaxed) {
+            // Wi-Fi reconnects, sleep and login before the network is up change the
+            // interface set; refresh it instead of waiting for an engine restart.
+            let interval = Duration::from_secs(if joined.is_empty() { 1 } else { 5 });
+            if refreshed.elapsed() >= interval {
+                if let Ok(current) = ipv4_interfaces() {
+                    interfaces = current;
+                }
+                joined.retain(|ip| {
+                    let present = interfaces.iter().any(|iface| iface.ip == *ip);
+                    if !present {
+                        let _ = socket.leave_multicast_v4(&GROUP, ip);
+                    }
+                    present
+                });
+                for iface in &interfaces {
+                    if !joined.contains(&iface.ip)
+                        && socket.join_multicast_v4(&GROUP, &iface.ip).is_ok()
+                    {
+                        joined.insert(iface.ip);
+                    }
+                }
+                refreshed = Instant::now();
+            }
             if announced.elapsed() >= Duration::from_secs(2) {
                 let c = self.config.lock().unwrap().clone();
                 let data = serde_json::to_vec(
@@ -535,7 +671,7 @@ impl Engine {
                 announced = Instant::now();
             }
             match retry_interrupted(|| socket.recv_from(&mut buffer)) {
-                Ok((n, addr)) if local_address(addr.ip()) => {
+                Ok((n, addr)) if in_subnet(addr.ip(), &interfaces) => {
                     if let Ok(v) = serde_json::from_slice::<Value>(&buffer[..n]) {
                         let c = self.config.lock().unwrap();
                         if v["app"] == "hl100-drop"
@@ -574,6 +710,8 @@ impl Engine {
                         io::ErrorKind::WouldBlock
                             | io::ErrorKind::TimedOut
                             | io::ErrorKind::Interrupted
+                            // Windows reports an ICMP "port unreachable" on the next UDP receive.
+                            | io::ErrorKind::ConnectionReset
                     ) => {}
                 Err(e) => return Err(e),
             }
@@ -665,7 +803,15 @@ impl Engine {
                 .try_fold(0u64, |sum, e| sum.checked_add(e.size))
                 .ok_or_else(|| io::Error::other("Слишком большой размер"))?;
             // Allocate a local transfer ID; sender IDs are only informational.
-            let id = format!("receive-{}", NEXT_ID.fetch_add(1, Ordering::Relaxed));
+            // Unique across restarts: part names embed the ID and must never match a stale file.
+            let stamp = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos();
+            let id = format!(
+                "receive-{stamp:x}-{}",
+                NEXT_ID.fetch_add(1, Ordering::Relaxed)
+            );
             let cancel = Arc::new(AtomicBool::new(false));
             self.transfers
                 .lock()
@@ -722,8 +868,10 @@ impl Engine {
             })();
             if let Err(err) = &receive_result {
                 let _ = frame_write(&mut stream, &json!({"ok":false,"error":err.to_string()}));
+                self.storage.abort(&id);
+            } else {
+                self.storage.forget(&id);
             }
-            self.storage.abort(&id);
             self.complete(&id, receive_result, cancel.load(Ordering::Relaxed));
             Ok((id, offer.entries))
         })();
@@ -776,7 +924,18 @@ fn check_cancel(cancel: &AtomicBool) -> io::Result<()> {
     }
 }
 pub fn collect_paths(paths: &[String]) -> io::Result<Vec<Source>> {
-    fn walk(path: &Path, relative: String, out: &mut Vec<Source>) -> io::Result<()> {
+    collect_paths_counted(paths).map(|(sources, _)| sources)
+}
+/// Collect the selected files and folders. Inside a selected folder, links,
+/// unreadable items and names other devices cannot store are skipped and counted
+/// instead of failing the whole folder.
+pub fn collect_paths_counted(paths: &[String]) -> io::Result<(Vec<Source>, usize)> {
+    fn walk(
+        path: &Path,
+        relative: String,
+        out: &mut Vec<Source>,
+        skipped: &mut usize,
+    ) -> io::Result<()> {
         valid_path(&relative)?;
         let meta = fs::symlink_metadata(path)?;
         if meta.file_type().is_symlink() {
@@ -784,9 +943,16 @@ pub fn collect_paths(paths: &[String]) -> io::Result<Vec<Source>> {
         }
         let directory = meta.is_dir();
         let source_path = path.to_path_buf();
+        let canonical = fs::canonicalize(path)?;
+        let modified = meta
+            .modified()?
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_nanos()
+            .to_string();
         out.push(Source {
-            local_path: Some(fs::canonicalize(path)?),
-            locator: Some(json!({"path":fs::canonicalize(path)?,"size":meta.len(),"modified":meta.modified()?.duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_nanos().to_string()})),
+            locator: Some(json!({"path":canonical,"size":meta.len(),"modified":modified})),
+            local_path: Some(canonical),
             entry: Entry {
                 path: relative.clone(),
                 size: if directory { 0 } else { meta.len() },
@@ -800,20 +966,27 @@ pub fn collect_paths(paths: &[String]) -> io::Result<Vec<Source>> {
         });
         if directory {
             for item in fs::read_dir(path)? {
-                let item = item?;
-                if item.file_name() == ".drop-state" {
+                let Ok(item) = item else {
+                    *skipped += 1;
+                    continue;
+                };
+                let name = item.file_name();
+                if name == ".drop-state" || name == ".DS_Store" {
                     continue;
                 }
-                walk(
-                    &item.path(),
-                    format!("{relative}/{}", item.file_name().to_string_lossy()),
-                    out,
-                )?;
+                let child = format!("{relative}/{}", name.to_string_lossy());
+                let mark = out.len();
+                if walk(&item.path(), child, out, skipped).is_err() {
+                    // Keep the manifest consistent: drop a partially collected subtree.
+                    out.truncate(mark);
+                    *skipped += 1;
+                }
             }
         }
         Ok(())
     }
     let mut out = Vec::new();
+    let mut skipped = 0;
     for path in paths {
         let p = Path::new(path);
         walk(
@@ -823,20 +996,30 @@ pub fn collect_paths(paths: &[String]) -> io::Result<Vec<Source>> {
                 .to_string_lossy()
                 .into(),
             &mut out,
+            &mut skipped,
         )?;
     }
-    Ok(out)
+    Ok((out, skipped))
 }
 static ENGINE: OnceLock<Mutex<Option<Arc<Engine>>>> = OnceLock::new();
 fn registry() -> &'static Mutex<Option<Arc<Engine>>> {
     ENGINE.get_or_init(|| Mutex::new(None))
 }
+/// The running engine, without holding the registry lock during long work such
+/// as walking a large folder; `poll` from the UI must never wait behind it.
+fn current_engine() -> io::Result<Arc<Engine>> {
+    registry()
+        .lock()
+        .unwrap()
+        .clone()
+        .ok_or_else(|| io::Error::other("Устройство ещё не настроено"))
+}
 pub fn dispatch(command: &str) -> Value {
     let result = (|| -> io::Result<Value> {
         let v: Value = serde_json::from_str(command)?;
-        let mut guard = registry().lock().unwrap();
         match v["op"].as_str().unwrap_or("") {
             "start" => {
+                let mut guard = registry().lock().unwrap();
                 if let Some(e) = guard.as_ref() {
                     if e.busy() {
                         return Err(io::Error::other("Дождитесь завершения передач"));
@@ -850,15 +1033,14 @@ pub fn dispatch(command: &str) -> Value {
                 Ok(json!({"ok":true}))
             }
             "stop" => {
+                let mut guard = registry().lock().unwrap();
                 if let Some(e) = guard.take() {
                     e.stop();
                 }
                 Ok(json!({"ok":true}))
             }
             op => {
-                let e = guard
-                    .as_ref()
-                    .ok_or_else(|| io::Error::other("Устройство ещё не настроено"))?;
+                let e = current_engine()?;
                 match op {
                     "poll" => Ok(e.poll()),
                     "cancel" => {
@@ -878,12 +1060,16 @@ pub fn dispatch(command: &str) -> Value {
                         .parse()
                         .map_err(io::Error::other)?;
                         let paths: Vec<String> = serde_json::from_value(v["paths"].clone())?;
+                        let (sources, skipped) = collect_paths_counted(&paths)?;
                         let id = e.send(
                             addr,
                             v["name"].as_str().unwrap_or("Устройство").into(),
-                            collect_paths(&paths)?,
+                            sources,
                         )?;
-                        Ok(json!({"ok":true,"transfer":id}))
+                        if skipped > 0 {
+                            e.event(json!({"type":"error","message":format!("Передача началась. Пропущено объектов: {skipped} (ссылки, нет доступа или недопустимое имя)")}));
+                        }
+                        Ok(json!({"ok":true,"transfer":id,"skipped":skipped}))
                     }
                     _ => Err(io::Error::other("Неизвестная команда")),
                 }
@@ -1316,26 +1502,106 @@ mod tests {
                 collect_paths(&[source.join("папка").to_string_lossy().into()]).unwrap(),
             )
             .unwrap();
+        // `busy` only covers active I/O, so wait for the completion event itself.
         let deadline = Instant::now() + Duration::from_secs(10);
-        while sender.busy() && Instant::now() < deadline {
+        let mut events = Vec::new();
+        while Instant::now() < deadline && !events.iter().any(|v: &Value| v["type"] == "complete") {
+            events.extend(sender.poll()["events"].as_array().unwrap().clone());
             thread::sleep(Duration::from_millis(50));
         }
-        assert!(!sender.busy());
-        let result = sender.poll();
         assert!(
-            result["events"]
-                .as_array()
-                .unwrap()
+            events
                 .iter()
-                .any(|v| v["status"] == "done"),
-            "{result}"
+                .any(|v| v["type"] == "complete" && v["status"] == "done"),
+            "{events:?}"
         );
+        assert!(!sender.busy());
         assert_eq!(fs::read(dest.join("папка (1)/данные.bin")).unwrap(), bytes);
         assert!(dest.join("папка (1)/empty").is_dir());
         assert_eq!(fs::read(dest.join("папка")).unwrap(), b"existing");
         sender.stop();
         receiver.stop();
         thread::sleep(Duration::from_millis(400));
+        fs::remove_dir_all(root).unwrap();
+    }
+    #[test]
+    fn windows_names_from_other_platforms_are_mapped() {
+        for (wire, local) in [
+            ("What?.txt", "What_.txt"),
+            ("a|b<c>d\"e*f", "a_b_c_d_e_f"),
+            ("name.", "name_"),
+            ("trailing  ", "trailing_"),
+            ("CON.txt", "_CON.txt"),
+            ("com1", "_com1"),
+            ("Console.txt", "Console.txt"),
+            ("фото.jpg", "фото.jpg"),
+        ] {
+            assert_eq!(local_component(wire, true), local, "{wire}");
+        }
+        assert_eq!(local_component("What?.txt", false), "What?.txt");
+    }
+    #[cfg(windows)]
+    #[test]
+    fn receives_mac_file_name_on_windows() {
+        let root = std::env::temp_dir().join(format!("hl100-names-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&root);
+        let storage = DiskStorage::new(&root);
+        let entry = Entry {
+            path: "Отчёт?/итог|1.txt".into(),
+            size: 2,
+            directory: false,
+        };
+        let mut file = storage.open("names", &entry).unwrap().unwrap();
+        file.write_all(b"ok").unwrap();
+        drop(file);
+        storage.finish("names", &entry).unwrap();
+        assert_eq!(fs::read(root.join("Отчёт_/итог_1.txt")).unwrap(), b"ok");
+        assert_eq!(
+            storage.local_path("names", &entry).unwrap(),
+            root.join("Отчёт_/итог_1.txt")
+        );
+        fs::remove_dir_all(root).unwrap();
+    }
+    #[test]
+    fn abort_after_restart_removes_derived_part_files() {
+        let root = std::env::temp_dir().join(format!("hl100-parts-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&root);
+        let entry = Entry {
+            path: "folder/a.bin".into(),
+            size: 10,
+            directory: false,
+        };
+        {
+            let storage = DiskStorage::new(&root);
+            storage.open("rx-parts", &entry).unwrap().unwrap();
+        }
+        // A new instance knows only the durable root reservation.
+        let storage = DiskStorage::new(&root);
+        assert_eq!(
+            storage.resume_offset("rx-parts", &entry).unwrap(),
+            (0, false)
+        );
+        storage.abort("rx-parts");
+        assert!(!root.join("folder/a.bin.rx-parts.part").exists());
+        fs::remove_dir_all(root).unwrap();
+    }
+    #[test]
+    fn folder_skips_unreadable_items_and_finder_metadata() {
+        let root = std::env::temp_dir().join(format!("hl100-skip-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&root);
+        fs::create_dir_all(root.join("folder")).unwrap();
+        fs::write(root.join("folder/keep.txt"), b"k").unwrap();
+        fs::write(root.join("folder/.DS_Store"), b"x").unwrap();
+        #[cfg(unix)]
+        std::os::unix::fs::symlink(root.join("folder/keep.txt"), root.join("folder/link")).unwrap();
+        let (sources, skipped) =
+            collect_paths_counted(&[root.join("folder").to_string_lossy().into()]).unwrap();
+        let names = sources
+            .iter()
+            .map(|s| s.entry.path.as_str())
+            .collect::<Vec<_>>();
+        assert_eq!(names, vec!["folder", "folder/keep.txt"]);
+        assert_eq!(skipped, if cfg!(unix) { 1 } else { 0 });
         fs::remove_dir_all(root).unwrap();
     }
 }

@@ -77,5 +77,15 @@ class NativeBridge(context: Context, private val tree: Uri) {
         roots.keys.filter { it.startsWith(prefix) }.forEach { roots.remove(it) }
         completed.keys.filter { it.startsWith(prefix) }.forEach { completed.remove(it) };persist()
     }
+    /** Forget transfers the core can no longer restore; their name reservations block reuse. */
+    @Synchronized
+    fun retainTransfers(json: String) {
+        val live = JSONArray(json).let { ids -> (0 until ids.length()).map { ids.getString(it) }.toSet() }
+        fun dead(key: String) = key.substringBefore(':') !in live
+        val before = roots.size + partials.size + completed.size
+        partials.filterKeys(::dead).values.forEach { it.first.delete() }
+        roots.keys.removeAll(::dead); partials.keys.removeAll(::dead); completed.keys.removeAll(::dead)
+        if (roots.size + partials.size + completed.size != before) persist()
+    }
     private fun numbered(name: String,n: Int): String { val i=name.lastIndexOf('.');return if(i>0)name.substring(0,i)+" ($n)"+name.substring(i) else "$name ($n)" }
 }
