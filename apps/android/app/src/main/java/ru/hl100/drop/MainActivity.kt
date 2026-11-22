@@ -35,10 +35,11 @@ class MainActivity:ComponentActivity() {
     private var sharedUris by mutableStateOf(listOf<Uri>())
     private var folderPicked:((Uri)->Unit)?=null
     private var pendingApk:File?=null
-    private val documents=registerForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { uris->selected?.let { peer->sendPicked(peer,uris) } }
-    private val photos=registerForActivityResult(ActivityResultContracts.PickMultipleVisualMedia()) { uris->selected?.let { peer->sendPicked(peer,uris) } }
-    private val sendTree=registerForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri->if(uri!=null)selected?.let { peer->sendPicked(peer,listOf(uri),true) } }
-    private val saveTree=registerForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri->if(uri!=null){contentResolver.takePersistableUriPermission(uri,Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION);folderPicked?.invoke(uri)} }
+    private var picking=false
+    private val documents=registerForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { uris->picking=false;selected?.let { peer->sendPicked(peer,uris) } }
+    private val photos=registerForActivityResult(ActivityResultContracts.PickMultipleVisualMedia()) { uris->picking=false;selected?.let { peer->sendPicked(peer,uris) } }
+    private val sendTree=registerForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri->picking=false;if(uri!=null)selected?.let { peer->sendPicked(peer,listOf(uri),true) } }
+    private val saveTree=registerForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri->picking=false;if(uri!=null){contentResolver.takePersistableUriPermission(uri,Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION);folderPicked?.invoke(uri)} }
     override fun onCreate(savedInstanceState:Bundle?) {
         super.onCreate(savedInstanceState)
         val prefs=DropState.preferences(this)
@@ -54,9 +55,9 @@ class MainActivity:ComponentActivity() {
                     var settings by remember { mutableStateOf(false) }
                     var configured by remember { mutableStateOf(DropState.name.isNotBlank()&&DropState.folder.isNotBlank()) }
                     pickerPeer?.let { peer->AlertDialog(onDismissRequest={pickerPeer=null},title={Text("Отправить на ${peer.name}")},text={Column{
-                        Action("ФОТО И ВИДЕО"){selected=peer;pickerPeer=null;photos.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageAndVideo))}
-                        Spacer(Modifier.height(12.dp));Action("ФАЙЛЫ"){selected=peer;pickerPeer=null;documents.launch(arrayOf("*/*"))}
-                        Spacer(Modifier.height(12.dp));Action("ПАПКА"){selected=peer;pickerPeer=null;sendTree.launch(null)}
+                        Action("ФОТО И ВИДЕО"){selected=peer;pickerPeer=null;picking=true;photos.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageAndVideo))}
+                        Spacer(Modifier.height(12.dp));Action("ФАЙЛЫ"){selected=peer;pickerPeer=null;picking=true;documents.launch(arrayOf("*/*"))}
+                        Spacer(Modifier.height(12.dp));Action("ПАПКА"){selected=peer;pickerPeer=null;picking=true;sendTree.launch(null)}
                     }},confirmButton={},dismissButton={TextButton(onClick={pickerPeer=null}){Text("ОТМЕНА")}},shape=RectangleShape) }
                     if(configured&&sharedUris.isNotEmpty())AlertDialog(onDismissRequest={sharedUris=emptyList()},title={Text("Отправить через DROP")},text={Column(Modifier.verticalScroll(rememberScrollState())){
                         Text("${sharedUris.size} файлов · выбери устройство",color=Muted)
@@ -111,7 +112,7 @@ class MainActivity:ComponentActivity() {
         Label(if(first)"[ 01 / HELLO, FRIEND ]" else "[ SETTINGS ]");Spacer(Modifier.height(24.dp))
         OutlinedTextField(value=name,onValueChange={name=it},label={Text("Имя устройства")},singleLine=true,modifier=Modifier.fillMaxWidth(),shape=RectangleShape)
         Spacer(Modifier.height(20.dp));Text("Папка сохранения",color=Muted);Text(if(folder.isBlank())"Не выбрана" else Uri.parse(folder).lastPathSegment?:folder,fontSize=12.sp,modifier=Modifier.padding(vertical=8.dp))
-        Action("ВЫБРАТЬ ПАПКУ"){folderPicked={folder=it.toString()};saveTree.launch(if(folder.isBlank())null else Uri.parse(folder))}
+        Action("ВЫБРАТЬ ПАПКУ"){folderPicked={folder=it.toString()};picking=true;saveTree.launch(if(folder.isBlank())null else Uri.parse(folder))}
         if(!first){Row(Modifier.padding(vertical=16.dp)){Checkbox(checked=updates,onCheckedChange={updates=it});Text("Проверять обновления при запуске",modifier=Modifier.padding(top=12.dp))};Text("Версия ${BuildConfig.VERSION_NAME}");TextButton(onClick={lifecycleScope.launch{DropState.checkUpdates(true)}}){Text("ПРОВЕРИТЬ ОБНОВЛЕНИЯ")};DropState.release?.let {Text("Версия ${it.version}\n${it.notes}",color=Muted);Action(DropState.updateProgress?:"ОБНОВИТЬСЯ",DropState.updateProgress==null){update()}} }
         if(!first){
             Row(verticalAlignment=androidx.compose.ui.Alignment.CenterVertically){Switch(checked=background,onCheckedChange={background=it});Spacer(Modifier.width(12.dp));Text("Принимать в фоне")}
@@ -127,9 +128,9 @@ class MainActivity:ComponentActivity() {
         if(!first)TextButton(onClick=onBack){Text("НАЗАД")}
     }
     override fun onStart(){super.onStart();TransferService.setVisible(true);if(DropState.name.isNotBlank()&&DropState.folder.isNotBlank())TransferService.start(this)}
-    // onStop, not onPause: system file/photo pickers and split screen pause the activity
-    // while it is still the app in use; stopping reception there restarts the engine.
-    override fun onStop(){TransferService.setVisible(false);super.onStop()}
+    // onStop, not onPause: split screen only pauses the activity. System pickers open as a
+    // separate task and do stop it, so a running pick still counts as using the app.
+    override fun onStop(){if(!picking)TransferService.setVisible(false);super.onStop()}
     private fun sendPicked(peer:Peer,uris:List<Uri>,tree:Boolean=false){uris.forEach{uri->try{contentResolver.takePersistableUriPermission(uri,Intent.FLAG_GRANT_READ_URI_PERMISSION)}catch(_:SecurityException){}};TransferService.send(this,peer,uris,tree)}
     private fun receiveShare(value:Intent){
         if(value.action!=Intent.ACTION_SEND&&value.action!=Intent.ACTION_SEND_MULTIPLE)return
