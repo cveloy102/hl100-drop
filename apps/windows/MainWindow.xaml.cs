@@ -38,11 +38,12 @@ public partial class MainWindow : Window {
     public bool IsConfigured => settings.Configured;
     public async Task InitializeAsync() {
         if(!settings.Configured){ShowSettingsPage(true);return;}
-        await Start();if(settings.CheckUpdates)await CheckUpdate(false);
+        await Start(settings.Name,settings.Folder);if(settings.CheckUpdates)await CheckUpdate(false);
     }
-    private async Task Start() {
-        try {var result=await Task.Run(()=>Native.Call(new{op="start",config=new{id=settings.Id,name=settings.Name,folder=settings.Folder}}));Native.Check(result);running=true;Identity.Text=$"{settings.Name} / ПРИЁМ: {settings.Folder}";Status.Text="Готов к отправке и автоматическому приёму";timer.Start();}
-        catch(Exception e){Status.Text="Не удалось запустить: "+e.Message;}
+    // Returns the core's refusal instead of throwing, so callers can keep the old settings.
+    private async Task<string?> Start(string name,string folder) {
+        try {var result=await Task.Run(()=>Native.Call(new{op="start",config=new{id=settings.Id,name,folder}}));Native.Check(result);running=true;Identity.Text=$"{name} / ПРИЁМ: {folder}";Status.Text="Готов к отправке и автоматическому приёму";timer.Start();return null;}
+        catch(Exception e){Status.Text="Не удалось запустить: "+e.Message;return e.Message;}
     }
     private async Task Poll() {
         if(!running||polling)return;polling=true;
@@ -115,10 +116,12 @@ public partial class MainWindow : Window {
         if(!transfers.TryGetValue(id,out var row))return;
         if(type=="state"){row.State=e.GetProperty("status").GetString()!;row.Pause.IsEnabled=e.TryGetProperty("resumable",out var supported)&&supported.GetBoolean();row.Pause.Content=row.State=="paused"?"ПРОДОЛЖИТЬ":"ПАУЗА";if(row.State=="paused")row.Text.Text="На паузе / "+Bytes(row.Total);else if(row.State=="waiting")row.Text.Text="Ожидание соединения / "+Bytes(row.Total);}
         if(type=="file"&&e.TryGetProperty("local_path",out var saved)&&saved.ValueKind==JsonValueKind.String){var path=saved.GetString()!;row.SavedPath??=path;if(row.Files.TryGetValue(e.GetProperty("path").GetString()!,out var button)){button.IsEnabled=true;button.ToolTip="Показать в папке: "+path;button.Click+=(_,_)=>Reveal(path);}}
-        if(type=="progress"){var done=e.GetProperty("done").GetDouble();var total=e.GetProperty("total").GetDouble();row.Bar.Value=total>0?done/total*100:100;row.Text.Text=$"{Bytes(done)} / {Bytes(total)}\n{Bytes(e.GetProperty("speed").GetDouble())}/с · осталось {TimeSpan.FromSeconds(Math.Min(e.GetProperty("remaining").GetDouble(),864000)):hh\\:mm\\:ss}";}
+        if(type=="progress"){var done=e.GetProperty("done").GetDouble();var total=e.GetProperty("total").GetDouble();row.Bar.Value=total>0?done/total*100:100;row.Text.Text=$"{Bytes(done)} / {Bytes(total)}\n{Bytes(e.GetProperty("speed").GetDouble())}/с · осталось {Eta(e.GetProperty("remaining").GetDouble())}";}
         if(type=="complete"){var status=e.GetProperty("status").GetString();row.Text.Text=(status=="done"?"Готово ✓":status=="cancelled"?"Отменено":"Ошибка: "+e.GetProperty("message").GetString())+" / "+Bytes(row.Total);row.Cancel.Visibility=Visibility.Collapsed;row.Pause.Visibility=Visibility.Collapsed;if(status=="done"){row.Bar.Value=100;Status.Text="Передача завершена";if(row.Receiving&&settings.Notifications){toast?.Close();var savedPath=row.SavedPath??settings.Folder;toast=new ReceiveToast(row.FirstName.Length>0?row.FirstName:"Файлы получены",$"{row.Count} объектов / {Bytes(row.Total)}",()=>Reveal(savedPath));toast.Show();}}transfers.Remove(id);TrimHistory();}
     }
     private void TrimHistory(){while(TransferList.Children.Count>100){var old=TransferList.Children.OfType<StackPanel>().LastOrDefault(s=>s.Tag is string id&&!transfers.ContainsKey(id));if(old==null)break;TransferList.Children.Remove(old);}}
+    // Total hours, not the 0-23 hour component: long transfers must not show a wrapped time.
+    private static string Eta(double seconds){var t=TimeSpan.FromSeconds(Math.Clamp(seconds,0,864000));return $"{(int)t.TotalHours:00}:{t.Minutes:00}:{t.Seconds:00}";}
     private static string Bytes(double n){string[] units={"Б","КБ","МБ","ГБ","ТБ"};int i=0;while(n>=1024&&i<units.Length-1){n/=1024;i++;}return $"{n:0.#} {units[i]}";}
     private void OpenSettings(object sender,RoutedEventArgs e) {
         if(SettingsPage.Visibility==Visibility.Visible){if(settings.Configured)CloseSettings();return;}
@@ -147,11 +150,17 @@ public partial class MainWindow : Window {
             if(restart&&busy){settingsFeedback.Text="Имя и папку можно изменить после завершения передач";return;}
             try {
                 Directory.CreateDirectory(folder.Text);
+                var newName=name.Text.Trim();var newFolder=folder.Text;
+                // Persist only what the core accepted; otherwise the next launch would use settings that never ran.
+                if(restart&&await Start(newName,newFolder) is string refusal){
+                    if(running)await Start(settings.Name,settings.Folder);
+                    settingsFeedback.Text="Не удалось применить: "+refusal;return;
+                }
                 if(!first&&LoginLaunch.Enabled!=(login.IsChecked==true))LoginLaunch.Set(login.IsChecked==true);
-                settings.Name=name.Text.Trim();settings.Folder=folder.Text;settings.Configured=true;
+                settings.Name=newName;settings.Folder=newFolder;settings.Configured=true;
                 if(!first){settings.CheckUpdates=auto.IsChecked==true;settings.Notifications=notifications.IsChecked==true;}
                 settings.Save();if(!settings.Notifications){toast?.Close();toast=null;}
-                CloseSettings();if(restart)await Start();if(first&&settings.CheckUpdates)await CheckUpdate(false);
+                CloseSettings();if(first&&settings.CheckUpdates)await CheckUpdate(false);
             }catch(Exception err){settingsFeedback.Text="Не удалось сохранить: "+err.Message;}
         };stack.Children.Add(save);
     }
@@ -165,5 +174,6 @@ public partial class MainWindow : Window {
         catch(Exception err){MessageBox.Show(this,"Не удалось обновиться: "+err.Message,"Обновление");}finally{updating=false;if(release!=null)UpdateText.Text=$"Доступна новая версия {release.Version}";}
     }
     private void WindowClosing(object? sender,System.ComponentModel.CancelEventArgs e){if(exiting)return;e.Cancel=true;Hide();}
-    private void Exit(){if(busy&&MessageBox.Show(this,"Передачи будут прерваны. Выйти?","HL100 Drop",MessageBoxButton.YesNo)!=MessageBoxResult.Yes)return;exiting=true;timer.Stop();if(running)Native.Call(new{op="stop"});toast?.Close();tray.Dispose();System.Windows.Application.Current.Shutdown();}
+    // Stopping waits for network threads; keep the UI thread responsive meanwhile.
+    private async void Exit(){if(exiting)return;if(busy&&MessageBox.Show(this,"Передачи будут прерваны. Выйти?","HL100 Drop",MessageBoxButton.YesNo)!=MessageBoxResult.Yes)return;exiting=true;timer.Stop();Hide();toast?.Close();tray.Visible=false;if(running)await Task.Run(()=>Native.Call(new{op="stop"}));tray.Dispose();System.Windows.Application.Current.Shutdown();}
 }

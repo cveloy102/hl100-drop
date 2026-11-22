@@ -2,6 +2,8 @@ package ru.hl100.drop
 
 import android.content.Context
 import android.net.Uri
+import android.provider.DocumentsContract
+import android.provider.OpenableColumns
 import androidx.compose.runtime.*
 import androidx.documentfile.provider.DocumentFile
 import kotlinx.coroutines.*
@@ -65,12 +67,36 @@ object DropState {
         if(updateProgress!=null){status="Дождитесь обновления";return}
         try { status="Подготовка файлов…";withContext(Dispatchers.IO) {
             val items=JSONArray()
-            fun add(doc:DocumentFile,path:String) {
-                if(!doc.isDirectory && !doc.isFile)throw IOException("Файл недоступен")
-                items.put(JSONObject().put("uri",doc.uri.toString()).put("path",path).put("size",if(doc.isDirectory)0 else doc.length()).put("modified",doc.lastModified()).put("directory",doc.isDirectory))
-                if(doc.isDirectory)doc.listFiles().forEach { add(it,"$path/${it.name ?: "file"}") }
+            fun put(uri:Uri,path:String,size:Long,modified:Long,directory:Boolean){items.put(JSONObject().put("uri",uri.toString()).put("path",path).put("size",if(directory)0 else size).put("modified",modified).put("directory",directory))}
+            // One query per folder instead of several per file: SAF calls are IPC round trips.
+            fun walk(tree:Uri,parent:String,path:String) {
+                val columns=arrayOf(DocumentsContract.Document.COLUMN_DOCUMENT_ID,DocumentsContract.Document.COLUMN_DISPLAY_NAME,DocumentsContract.Document.COLUMN_MIME_TYPE,DocumentsContract.Document.COLUMN_SIZE,DocumentsContract.Document.COLUMN_LAST_MODIFIED)
+                val children=c.contentResolver.query(DocumentsContract.buildChildDocumentsUriUsingTree(tree,parent),columns,null,null,null)?:throw IOException("Папка недоступна")
+                val folders=mutableListOf<Pair<String,String>>()
+                children.use { row-> while(row.moveToNext()) {
+                    val id=row.getString(0);val name=row.getString(1)?:"file";val directory=row.getString(2)==DocumentsContract.Document.MIME_TYPE_DIR
+                    put(DocumentsContract.buildDocumentUriUsingTree(tree,id),"$path/$name",if(row.isNull(3))0 else row.getLong(3),if(row.isNull(4))0 else row.getLong(4),directory)
+                    if(directory)folders+=id to "$path/$name"
+                } }
+                folders.forEach { (id,child)->walk(tree,id,child) }
             }
-            uris.forEach { uri->val doc=if(tree)DocumentFile.fromTreeUri(c,uri) else DocumentFile.fromSingleUri(c,uri);if(doc==null)throw IOException("Файл недоступен");add(doc,doc.name?:"file") }
+            // Shared files often come from a FileProvider, which reports only name and size.
+            fun single(uri:Uri) {
+                var name:String?=null;var size=-1L
+                c.contentResolver.query(uri,arrayOf(OpenableColumns.DISPLAY_NAME,OpenableColumns.SIZE),null,null,null)?.use { row->
+                    if(row.moveToFirst()){val n=row.getColumnIndex(OpenableColumns.DISPLAY_NAME);val s=row.getColumnIndex(OpenableColumns.SIZE);if(n>=0&&!row.isNull(n))name=row.getString(n);if(s>=0&&!row.isNull(s))size=row.getLong(s)}
+                }
+                if(size<0)size=c.contentResolver.openAssetFileDescriptor(uri,"r")?.use{it.length}?:-1
+                if(size<0)throw IOException("Не удалось определить размер файла ${name?:""}".trim())
+                val modified=try{DocumentFile.fromSingleUri(c,uri)?.lastModified()?:0}catch(_:Exception){0L}
+                put(uri,name?:uri.lastPathSegment?:"file",size,modified,false)
+            }
+            uris.forEach { uri->
+                if(tree){
+                    val root=DocumentFile.fromTreeUri(c,uri)?:throw IOException("Папка недоступна");val name=root.name?:"folder"
+                    put(root.uri,name,0,root.lastModified(),true);walk(uri,DocumentsContract.getTreeDocumentId(uri),name)
+                } else single(uri)
+            }
             check(bridge?.call(JSONObject().put("op","send").put("address",peer.address).put("port",peer.port).put("name",peer.name).put("items",items))?:throw IOException("Приложение не запущено"))
         };busy=true;status="Передача началась" } catch(e:Exception){status=e.message?:"Ошибка отправки"}
     }
