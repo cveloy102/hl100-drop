@@ -127,7 +127,9 @@ class MainActivity:ComponentActivity() {
         if(!first)TextButton(onClick=onBack){Text("НАЗАД")}
     }
     override fun onStart(){super.onStart();TransferService.setVisible(true);if(DropState.name.isNotBlank()&&DropState.folder.isNotBlank())TransferService.start(this)}
-    override fun onPause(){TransferService.setVisible(false);super.onPause()}
+    // onStop, not onPause: system file/photo pickers and split screen pause the activity
+    // while it is still the app in use; stopping reception there restarts the engine.
+    override fun onStop(){TransferService.setVisible(false);super.onStop()}
     private fun sendPicked(peer:Peer,uris:List<Uri>,tree:Boolean=false){uris.forEach{uri->try{contentResolver.takePersistableUriPermission(uri,Intent.FLAG_GRANT_READ_URI_PERMISSION)}catch(_:SecurityException){}};TransferService.send(this,peer,uris,tree)}
     private fun receiveShare(value:Intent){
         if(value.action!=Intent.ACTION_SEND&&value.action!=Intent.ACTION_SEND_MULTIPLE)return

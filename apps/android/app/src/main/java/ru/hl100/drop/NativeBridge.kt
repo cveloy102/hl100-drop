@@ -14,6 +14,7 @@ class NativeBridge(context: Context, private val tree: Uri) {
     private val roots = mutableMapOf<String, Pair<DocumentFile,String>>()
     private val partials = mutableMapOf<String, Pair<DocumentFile,String>>()
     private val completed = mutableMapOf<String,DocumentFile>()
+    private val folders = mutableMapOf<String,DocumentFile>()
     private val preferences=context.getSharedPreferences("drop_storage",Context.MODE_PRIVATE)
     init {
         val saved=JSONObject(preferences.getString(tree.toString(),"{}")?:"{}")
@@ -55,9 +56,12 @@ class NativeBridge(context: Context, private val tree: Uri) {
         }
         var parent=pair.first
         val names=listOf(pair.second)+parts.drop(1)
-        for(name in names.dropLast(1)) parent=parent.findFile(name) ?: parent.createDirectory(name) ?: throw IOException("Не удалось создать папку $name")
+        // findFile lists the whole folder through SAF; resolve each folder once per transfer.
+        var folderKey="$transfer:"
+        fun folder(name:String):DocumentFile { folderKey+="/$name";val inside=parent;return folders.getOrPut(folderKey){ inside.findFile(name) ?: inside.createDirectory(name) ?: throw IOException("Не удалось создать папку $name") } }
+        for(name in names.dropLast(1)) parent=folder(name)
         val name=names.last()
-        if(directory) { if(parent.findFile(name)==null && parent.createDirectory(name)==null) throw IOException("Не удалось создать папку");persist();return -1 }
+        if(directory) { folder(name);persist();return -1 }
         val temp=parent.createFile("application/octet-stream","$name.$transfer.part") ?: throw IOException("Не удалось создать файл")
         partials["$transfer:$path"]=temp to name
         persist()
@@ -75,7 +79,8 @@ class NativeBridge(context: Context, private val tree: Uri) {
         val prefix="$transfer:"
         partials.keys.filter { it.startsWith(prefix) }.forEach { partials.remove(it)?.first?.delete() }
         roots.keys.filter { it.startsWith(prefix) }.forEach { roots.remove(it) }
-        completed.keys.filter { it.startsWith(prefix) }.forEach { completed.remove(it) };persist()
+        completed.keys.filter { it.startsWith(prefix) }.forEach { completed.remove(it) }
+        folders.keys.removeAll { it.startsWith(prefix) };persist()
     }
     /** Forget transfers the core can no longer restore; their name reservations block reuse. */
     @Synchronized
@@ -84,7 +89,7 @@ class NativeBridge(context: Context, private val tree: Uri) {
         fun dead(key: String) = key.substringBefore(':') !in live
         val before = roots.size + partials.size + completed.size
         partials.filterKeys(::dead).values.forEach { it.first.delete() }
-        roots.keys.removeAll(::dead); partials.keys.removeAll(::dead); completed.keys.removeAll(::dead)
+        roots.keys.removeAll(::dead); partials.keys.removeAll(::dead); completed.keys.removeAll(::dead); folders.keys.removeAll(::dead)
         if (roots.size + partials.size + completed.size != before) persist()
     }
     private fun numbered(name: String,n: Int): String { val i=name.lastIndexOf('.');return if(i>0)name.substring(0,i)+" ($n)"+name.substring(i) else "$name ($n)" }
