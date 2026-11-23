@@ -15,7 +15,7 @@
 [![Release](https://img.shields.io/github/v/release/cveloy102/hl100-drop?color=ef3f3b&label=версия)](https://github.com/cveloy102/hl100-drop/releases/latest)
 [![Build](https://github.com/cveloy102/hl100-drop/actions/workflows/checks.yml/badge.svg)](https://github.com/cveloy102/hl100-drop/actions/workflows/checks.yml)
 
-**[Сайт DROP](https://cveloy102.github.io/hl100-drop/)** · **[Скачать](https://github.com/cveloy102/hl100-drop/releases/latest)** · **[Инструкция](docs/usage.md)** · **[Что нового](CHANGELOG.md)** · **[Сообщить об ошибке](https://github.com/cveloy102/hl100-drop/issues/new/choose)**
+**[Сайт DROP](https://cveloy102.github.io/hl100-drop/)** · **[Скачать](https://github.com/cveloy102/hl100-drop/releases/latest)** · **[Инструкция](docs/usage.md)** · **[Что нового](CHANGELOG.md)** · **[Сообщить об ошибке](https://github.com/cveloy102/hl100-drop/issues/new/choose)** · [Каталог приложений](https://cveloy102.github.io/#drop)
 
 ![Главный экран DROP на Windows](docs/images/windows-main.png)
 
