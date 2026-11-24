@@ -1,27 +1,30 @@
-<div align="center">
-
-<img src="docs/images/drop-mark.svg" width="76" alt="DROP">
-
 # DROP
 
-### Файлы рядом. Без проводов.
+Передавайте файлы и папки между телефоном, компьютером и Mac по одной **доверенной локальной сети**. DROP принимает файлы автоматически. Передача внутри сети идёт без шифрования.
 
-Нативный файлообменник для Windows, Android и Mac.
-Одна локальная сеть. Выбранное устройство. Прямой обмен файлами и папками.
+## Что установить
 
-[![Windows](https://img.shields.io/badge/Windows-10%2B-222222?logo=windows&logoColor=white)](docs/usage.md#установка-на-windows)
-[![Android](https://img.shields.io/badge/Android-12%2B-222222?logo=android&logoColor=white)](docs/usage.md#установка-на-android)
-[![macOS](https://img.shields.io/badge/macOS-12%2B-222222?logo=apple&logoColor=white)](docs/usage.md#установка-на-macos)
-[![Release](https://img.shields.io/github/v/release/cveloy102/hl100-drop?color=ef3f3b&label=версия)](https://github.com/cveloy102/hl100-drop/releases/latest)
-[![Build](https://github.com/cveloy102/hl100-drop/actions/workflows/checks.yml/badge.svg)](https://github.com/cveloy102/hl100-drop/actions/workflows/checks.yml)
+Установите DROP на оба устройства. Для каждого выберите свою систему.
 
-**[Сайт DROP](https://cveloy102.github.io/hl100-drop/)** · **[Скачать](https://github.com/cveloy102/hl100-drop/releases/latest)** · **[Инструкция](docs/usage.md)** · **[Что нового](CHANGELOG.md)** · **[Сообщить об ошибке](https://github.com/cveloy102/hl100-drop/issues/new/choose)** · [Каталог приложений](https://cveloy102.github.io/#drop)
+| Устройство | Скачать | Как установить |
+| --- | --- | --- |
+| Windows 10+ x64 | [Установщик EXE](https://github.com/cveloy102/hl100-drop/releases/download/v1.1.3/HL100DropSetup-1.1.3.exe) | [На Windows](docs/usage.md#установка-на-windows) |
+| Android 12+ (ARM64, x86_64) | [Приложение APK](https://github.com/cveloy102/hl100-drop/releases/download/v1.1.3/HL100Drop-1.1.3.apk) | [На телефоне](docs/usage.md#установка-на-android) |
+| macOS 12+ (Intel, Apple Silicon) | [Образ DMG](https://github.com/cveloy102/hl100-drop/releases/download/v1.1.3/HL100Drop-1.1.3-universal.dmg) | [На Mac](docs/usage.md#установка-на-macos) |
 
-![Главный экран DROP на Windows](docs/images/windows-main.png)
+## Начало работы
 
-*DROP 1.1.0 на Windows: Mac и Android обнаружены в локальной сети. Оригинальный скриншот пользователя, 14 октября 2026 года.*
+1. Подключите оба устройства к одной домашней сети и откройте на них DROP.
+2. На каждом устройстве задайте имя и выберите папку приёма.
+3. На отправителе выберите получателя по имени и отправьте небольшой файл. Откройте папку приёма на втором устройстве и проверьте, что файл появился.
 
-</div>
+![DROP на Windows с обнаруженными устройствами в домашней сети](docs/images/windows-main.png)
+
+*На снимке DROP 1.1.0 для Windows обнаружил Mac и телефон Android.*
+
+**Если устройства не видят друг друга** — [проверить сеть и разрешения](docs/usage.md#устройство-не-появляется) · [сообщить об ошибке](https://github.com/cveloy102/hl100-drop/issues/new/choose).
+
+[Страница приложения](https://cveloy102.github.io/hl100-drop/) · [Все версии](https://github.com/cveloy102/hl100-drop/releases) · [Полная инструкция](docs/usage.md)
 
 ## От выбора устройства до готового файла
 
@@ -38,17 +41,6 @@ DROP обнаруживает другие устройства в той же �
 | Поделиться на Android | Галерея или другое приложение → «Поделиться» → DROP → устройство |
 | Работа в фоне | Windows — трей, Mac — строка меню; Android — настраиваемый приём в фоне |
 | Обновления | Проверка в настройках, плашка новой версии, загрузка по вашему действию |
-
-## Начало работы
-
-1. [Скачайте последний релиз](https://github.com/cveloy102/hl100-drop/releases/latest) для своих устройств.
-2. При первом запуске задайте **имя** и **папку приёма**.
-3. Подключите устройства к одной Wi-Fi / локальной сети и откройте DROP на обоих.
-4. Выберите устройство и отправьте файлы. Получателю не нужно подтверждать каждую передачу.
-
-**Windows 10+ x64 · Android 12+ ARM64 / x86_64 · macOS 12+ Intel и Apple Silicon.** Для обмена интернет не нужен. Интернет используется для проверки и скачивания обновлений.
-
-[Установка, фон, папки и докачка — пошагово →](docs/usage.md)
 
 ## Пауза без нового старта
 
@@ -72,7 +64,9 @@ Windows использует WPF, Android — Jetpack Compose, Mac — AppKit. �
 
 ## На Mac — в строке меню
 
-<table><tr><td><img src="docs/images/macos-main.png" width="360" alt="Панель DROP на Mac"></td><td><img src="docs/images/macos-settings.png" width="360" alt="Настройки DROP на Mac"></td></tr></table>
+![Панель DROP в строке меню Mac](docs/images/macos-main.png)
+
+[Посмотреть настройки на Mac](docs/images/macos-settings.png)
 
 *Настоящие AppKit views версии 1.1.1 с демонстрационными данными. Изображения получены в GitHub Actions, а не на пользовательском Mac.*
 
@@ -89,3 +83,5 @@ Windows использует WPF, Android — Jetpack Compose, Mac — AppKit. �
 DROP рассчитан на доверенную локальную сеть: авторизации и шифрования передачи нет, приём автоматический. macOS-сборки имеют ad hoc подпись без нотариализации Apple. Проверки минимальных версий ОС и конкретных сетей перечислены отдельно в [результатах проверок](docs/validation.md).
 
 Дизайн: чёрный фон, тёплый белый, красный акцент и моноширинный текст в стиле [HL100](https://tg.hl100.ru). **HL100_ / DROP**
+
+[Каталог приложений](https://cveloy102.github.io/#drop)
