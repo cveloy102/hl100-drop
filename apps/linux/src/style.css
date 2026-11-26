@@ -1,0 +1,106 @@
+/* DROP brand: same palette as Windows (App.xaml) and Mac. */
+window.drop {
+  background-color: #101010;
+  color: #e8e5d9;
+  font-family: "JetBrains Mono", "DejaVu Sans Mono", "Liberation Mono", "Noto Sans Mono", "Ubuntu Mono", monospace;
+  font-size: 14px;
+}
+window.drop .muted { color: #99998f; }
+window.drop .accent { color: #ef3f3b; }
+window.drop .small { font-size: 11px; }
+window.drop .brand { font-size: 36px; font-weight: 500; }
+window.drop .hero { font-size: 38px; }
+window.drop .peer-name { font-size: 20px; }
+window.drop .transfer-title { font-size: 18px; }
+
+window.drop button {
+  border-radius: 0;
+  border: none;
+  box-shadow: none;
+  background-image: none;
+  text-shadow: none;
+  outline-color: #e8e5d9;
+  padding: 10px 18px;
+  font-weight: bold;
+  min-height: 0;
+}
+window.drop button.primary { background-color: #ef3f3b; color: #101010; }
+window.drop button.secondary { background-color: #262623; color: #e8e5d9; }
+window.drop button.primary:hover, window.drop button.secondary:hover { opacity: 0.85; }
+window.drop button:disabled { opacity: 0.4; }
+window.drop button.file {
+  background-color: transparent;
+  color: #e8e5d9;
+  padding: 6px 0;
+  font-weight: normal;
+}
+window.drop button.file:hover { color: #ef3f3b; }
+window.drop button.file:disabled { opacity: 1; color: #e8e5d9; }
+
+window.drop .card {
+  border: 1px solid #3c3c36;
+  background-color: #181817;
+  padding: 18px;
+}
+window.drop .hint { border: 1px solid #30302d; padding: 16px; }
+window.drop .card.target, window.drop .hint.target {
+  border-color: #ef3f3b;
+  background-color: #2c1817;
+}
+window.drop .frame-target { box-shadow: inset 0 0 0 1px #ef3f3b; }
+window.drop .banner { border: 1px solid #ef3f3b; padding: 16px; }
+window.drop .footer { border-top: 1px solid #30302d; padding-top: 16px; }
+
+window.drop progressbar { padding: 0; }
+window.drop progressbar trough {
+  padding: 0;
+  margin: 0;
+  background-color: #262623;
+  min-height: 6px;
+  border-radius: 0;
+  border: none;
+}
+window.drop progressbar progress {
+  margin: 0;
+  min-width: 0;
+  background-color: #ef3f3b;
+  background-image: none;
+  min-height: 6px;
+  border-radius: 0;
+  border: none;
+}
+
+window.drop entry {
+  background-color: #181817;
+  color: #e8e5d9;
+  border: 1px solid #3c3c36;
+  border-radius: 0;
+  box-shadow: none;
+  padding: 6px 10px;
+  min-height: 28px;
+}
+window.drop entry:focus-within {
+  border-color: #ef3f3b;
+  outline: none;
+  box-shadow: none;
+}
+window.drop selection,
+window.drop entry selection,
+window.drop label selection {
+  background-color: #ef3f3b;
+  color: #101010;
+}
+window.drop checkbutton:focus-visible check,
+window.drop button:focus-visible { outline: 1px solid #e8e5d9; outline-offset: 2px; }
+window.drop checkbutton { color: #e8e5d9; }
+window.drop checkbutton check {
+  border-radius: 0;
+  border: 1px solid #99998f;
+  background-color: #181817;
+  background-image: none;
+  box-shadow: none;
+  color: #101010;
+}
+window.drop checkbutton check:checked { background-color: #ef3f3b; border-color: #ef3f3b; }
+window.drop scrollbar { background-color: transparent; border: none; }
+window.drop scrollbar slider { background-color: #3c3c36; border-radius: 0; min-width: 6px; }

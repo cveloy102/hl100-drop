@@ -1,0 +1,22 @@
+[Desktop Entry]
+Type=Application
+Name=DROP
+GenericName=File Transfer
+GenericName[ru]=Передача файлов
+Comment=Send files and folders between devices on your local network
+Comment[ru]=Передача файлов и папок между устройствами в локальной сети
+Exec=hl100-drop %F
+Icon=ru.hl100.drop
+Terminal=false
+Categories=Network;FileTransfer;GTK;
+Keywords=share;send;transfer;lan;wifi;phone;android;mac;windows;передача;отправить;файлы;
+MimeType=application/octet-stream;inode/directory;
+StartupNotify=true
+StartupWMClass=ru.hl100.drop
+SingleMainWindow=true
+Actions=Quit;
+
+[Desktop Action Quit]
+Name=Quit
+Name[ru]=Выход
+Exec=hl100-drop --quit

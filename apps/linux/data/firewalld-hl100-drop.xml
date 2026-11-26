@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<service>
+  <short>DROP</short>
+  <description>HL100 Drop: обнаружение устройств (UDP 41001) и передача файлов (TCP 41000) в локальной сети.</description>
+  <port protocol="tcp" port="41000"/>
+  <port protocol="udp" port="41001"/>
+</service>

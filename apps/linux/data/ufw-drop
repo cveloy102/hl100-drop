@@ -1,0 +1,4 @@
+[DROP]
+title=DROP
+description=Передача файлов по локальной сети (HL100 Drop)
+ports=41000/tcp|41001/udp

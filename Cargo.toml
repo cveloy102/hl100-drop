@@ -1,5 +1,7 @@
 [workspace]
-members = ["core"]
+members = ["core", "apps/linux"]
+# Windows/Mac/Android builds call plain `cargo build`: keep GTK out of them.
+default-members = ["core"]
 resolver = "2"
 
 [profile.release]

@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+  <id>ru.hl100.drop</id>
+  <metadata_license>CC0-1.0</metadata_license>
+  <name>DROP</name>
+  <summary>Send files and folders across your local network</summary>
+  <summary xml:lang="ru">Передача файлов и папок по локальной сети</summary>
+  <developer id="ru.hl100">
+    <name>HL100</name>
+  </developer>
+  <description>
+    <p>DROP sends files and folders between Linux, Windows, macOS and Android devices on the same trusted local network. Files arrive automatically in the folder you choose.</p>
+    <p xml:lang="ru">DROP передаёт файлы и папки между Linux, Windows, macOS и Android в одной доверенной локальной сети. Файлы принимаются автоматически в выбранную папку.</p>
+    <ul>
+      <li>Folders keep their structure, including empty folders</li>
+      <li>Direct TCP between devices, no cloud</li>
+      <li>Pause, resume and automatic recovery after a lost connection</li>
+      <li>Runs in the background with a tray icon</li>
+    </ul>
+    <p>Data on the local network is not encrypted. Use DROP only on networks you trust.</p>
+  </description>
+  <launchable type="desktop-id">ru.hl100.drop.desktop</launchable>
+  <url type="homepage">https://cveloy102.github.io/hl100-drop/</url>
+  <url type="bugtracker">https://github.com/cveloy102/hl100-drop/issues</url>
+  <url type="vcs-browser">https://github.com/cveloy102/hl100-drop</url>
+  <categories>
+    <category>Network</category>
+    <category>FileTransfer</category>
+  </categories>
+  <content_rating type="oars-1.1"/>
+  <provides>
+    <binary>hl100-drop</binary>
+  </provides>
+  <releases>
+    <release version="1.1.4" date="2026-11-27"/>
+  </releases>
+</component>
