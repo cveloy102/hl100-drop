@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Service
+MimeType=application/octet-stream;inode/directory;
+Actions=sendWithDrop;
+X-KDE-Priority=TopLevel
+
+[Desktop Action sendWithDrop]
+Name=Send with DROP
+Name[ru]=Отправить через DROP
+Icon=ru.hl100.drop
+Exec=hl100-drop %F

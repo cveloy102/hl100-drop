@@ -6,7 +6,8 @@ if ! command -v cargo >/dev/null && [[ -x .tools/cargo/bin/cargo ]]; then
     export CARGO_HOME="$task_root/.tools/cargo" RUSTUP_HOME="$task_root/.tools/rustup"
     export PATH="$CARGO_HOME/bin:$PATH"
 fi
-cargo test --workspace --locked
+# The workspace also holds the GTK app (apps/linux); the Mac only needs the core.
+cargo test -p hl100_core --locked
 task_arch="$(uname -m)"
 task_build="$task_root/apps/macos/build/tests"
 mkdir -p "$task_build"

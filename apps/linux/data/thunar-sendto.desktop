@@ -1,0 +1,7 @@
+[Desktop Entry]
+Type=X-XFCE-SendTo
+Name=DROP
+Name[ru]=DROP (на устройство в сети)
+Icon=ru.hl100.drop
+Exec=hl100-drop %F
+MimeType=application/octet-stream;inode/directory;

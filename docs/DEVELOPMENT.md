@@ -9,6 +9,7 @@
 | `core` | Rust: обнаружение, TCP, манифест, докачка, C ABI и JNI |
 | `apps/windows` | C# / WPF, трей, drag and drop, обновление |
 | `apps/android` | Kotlin / Compose, SAF, фон, «Поделиться» |
+| `apps/linux` | Rust / GTK 4, трей (StatusNotifierItem), уведомления, .deb и AppImage |
 | `apps/macos` | Swift / AppKit, строка меню, Finder, universal DMG |
 | `installer/windows` | Inno Setup, установка для текущего пользователя |
 | `site` | Статический сайт продукта на GitHub Pages |
@@ -49,6 +50,17 @@ bash scripts/test-macos.sh
 ```
 
 Результат: `artifacts/HL100Drop-1.1.1-universal.dmg`. App и dylib содержат x86_64 + arm64; проверяются lipo и codesign. По умолчанию подпись ad hoc. `MACOS_SIGN_IDENTITY` и `MACOS_NOTARY_PROFILE` позволяют использовать собственные Developer ID / нотариализацию. [Дополнительно](../apps/macos/README.md).
+
+## Linux
+
+Rust, `pkg-config`, GTK 4.12+ для разработки (Debian / Ubuntu / Kali: `sudo apt install cargo libgtk-4-dev`; Fedora: `gtk4-devel`; Arch: `gtk4`), `dpkg-deb`.
+
+```sh
+cargo run -p hl100-drop                 # запуск из исходников
+bash scripts/build-linux.sh             # artifacts/hl100-drop_<версия>_amd64.deb
+```
+
+AppImage собирается тем же скриптом, если указан `LINUXDEPLOY` и в `PATH` есть `linuxdeploy-plugin-gtk.sh` (так делает CI). Приложение подключает `core` как обычный Rust-крейт, без C ABI. Два экземпляра на одной машине: задайте каждому свой `HL100_SETTINGS_PATH`; второй займёт свободный TCP-порт. [Дополнительно](../apps/linux/README.md).
 
 ## CI и деплой
 
