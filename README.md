@@ -6,9 +6,9 @@
 
 Установите DROP на оба устройства. Для каждого выберите свою систему.
 
-- **Windows 10+ x64** — [Установщик EXE](https://github.com/cveloy102/hl100-drop/releases/download/v1.1.3/HL100DropSetup-1.1.3.exe) · [Установка на Windows](docs/usage.md#установка-на-windows).
-- **Android 12+ (ARM64, x86_64)** — [Приложение APK](https://github.com/cveloy102/hl100-drop/releases/download/v1.1.3/HL100Drop-1.1.3.apk) · [Установка на Android](docs/usage.md#установка-на-android).
-- **macOS 12+ (Intel, Apple Silicon)** — [Образ DMG](https://github.com/cveloy102/hl100-drop/releases/download/v1.1.3/HL100Drop-1.1.3-universal.dmg) · [Установка на macOS](docs/usage.md#установка-на-macos).
+- **Windows 10+ x64** — [Установщик EXE](https://github.com/cveloy102/hl100-drop/releases/download/v1.1.4/HL100DropSetup-1.1.4.exe) · [Установка на Windows](docs/usage.md#установка-на-windows).
+- **Android 12+ (ARM64, x86_64)** — [Приложение APK](https://github.com/cveloy102/hl100-drop/releases/download/v1.1.4/HL100Drop-1.1.4.apk) · [Установка на Android](docs/usage.md#установка-на-android).
+- **macOS 12+ (Intel, Apple Silicon)** — [Образ DMG](https://github.com/cveloy102/hl100-drop/releases/download/v1.1.4/HL100Drop-1.1.4-universal.dmg) · [Установка на macOS](docs/usage.md#установка-на-macos).
 
 ## Начало работы
 
