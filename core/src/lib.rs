@@ -471,6 +471,18 @@ fn in_subnet(ip: std::net::IpAddr, interfaces: &[if_addrs::Ifv4Addr]) -> bool {
         _ => false,
     }
 }
+fn bind_listener(port: u16) -> io::Result<TcpListener> {
+    #[cfg(unix)]
+    {
+        let socket = Socket::new(Domain::IPV4, Type::STREAM, Some(Protocol::TCP))?;
+        socket.set_reuse_address(true)?;
+        socket.bind(&SocketAddr::from((Ipv4Addr::UNSPECIFIED, port)).into())?;
+        socket.listen(128)?;
+        Ok(socket.into())
+    }
+    #[cfg(not(unix))]
+    TcpListener::bind((Ipv4Addr::UNSPECIFIED, port))
+}
 fn local_address(ip: std::net::IpAddr) -> bool {
     in_subnet(ip, &ipv4_interfaces().unwrap_or_default())
 }
@@ -479,16 +491,15 @@ impl Engine {
         if config.name.trim().is_empty() || config.id.is_empty() {
             return Err(io::Error::other("Укажите имя устройства"));
         }
-        #[cfg(unix)]
-        let listener: TcpListener = {
-            let socket = Socket::new(Domain::IPV4, Type::STREAM, Some(Protocol::TCP))?;
-            socket.set_reuse_address(true)?;
-            socket.bind(&SocketAddr::from((Ipv4Addr::UNSPECIFIED, config.port)).into())?;
-            socket.listen(128)?;
-            socket.into()
+        // The preferred port sits inside the Linux/Android ephemeral range
+        // (32768-60999), so another app's outgoing connection can hold it. Peers
+        // learn the port from discovery, so any free port works as a fallback.
+        let listener = match bind_listener(config.port) {
+            Err(err) if err.kind() == io::ErrorKind::AddrInUse && config.port != 0 => {
+                bind_listener(0)?
+            }
+            other => other?,
         };
-        #[cfg(not(unix))]
-        let listener = TcpListener::bind((Ipv4Addr::UNSPECIFIED, config.port))?;
         listener.set_nonblocking(true)?;
         let port = listener.local_addr()?.port();
         let e = Arc::new(Self {
@@ -1274,6 +1285,27 @@ mod tests {
             },
         ];
         assert!(validate_entries(&entries).is_err());
+    }
+    #[test]
+    fn busy_preferred_port_falls_back_to_free_port() {
+        let taken = TcpListener::bind((Ipv4Addr::UNSPECIFIED, 0)).unwrap();
+        let busy = taken.local_addr().unwrap().port();
+        let root = std::env::temp_dir().join(format!("hl100-busy-{}", std::process::id()));
+        fs::create_dir_all(&root).unwrap();
+        let engine = Engine::start(
+            Config {
+                id: "busy-test".into(),
+                name: "Busy".into(),
+                folder: root.to_string_lossy().into(),
+                port: busy,
+            },
+            Arc::new(DiskStorage::new(&root)),
+        )
+        .unwrap();
+        assert_ne!(engine.listener_port, busy);
+        assert_ne!(engine.listener_port, 0);
+        engine.stop();
+        let _ = fs::remove_dir_all(&root);
     }
     #[test]
     fn delayed_sender_is_received_on_nonblocking_listener() {
