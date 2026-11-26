@@ -60,7 +60,16 @@ cargo run -p hl100-drop                 # запуск из исходников
 bash scripts/build-linux.sh             # artifacts/hl100-drop_<версия>_amd64.deb
 ```
 
-AppImage собирается тем же скриптом, если указан `LINUXDEPLOY` и в `PATH` есть `linuxdeploy-plugin-gtk.sh` (так делает CI). Приложение подключает `core` как обычный Rust-крейт, без C ABI. Два экземпляра на одной машине: задайте каждому свой `HL100_SETTINGS_PATH`; второй займёт свободный TCP-порт. [Дополнительно](../apps/linux/README.md).
+Flatpak (GNOME 50, ставится сам с Flathub):
+
+```sh
+sudo apt install flatpak flatpak-builder
+flatpak remote-add --user --if-not-exists flathub https://dl.flathub.org/repo/flathub.flatpakrepo
+bash scripts/build-flatpak.sh --install   # artifacts/HL100Drop-<версия>-x86_64.flatpak
+flatpak run ru.hl100.drop
+```
+
+AppImage собирается скриптом `build-linux.sh`, если указан `LINUXDEPLOY` и в `PATH` есть `linuxdeploy-plugin-gtk.sh` (так делает CI). Приложение подключает `core` как обычный Rust-крейт, без C ABI. Два экземпляра на одной машине: задайте каждому свой `HL100_SETTINGS_PATH`; второй займёт свободный TCP-порт. [Дополнительно](../apps/linux/README.md).
 
 ## CI и деплой
 

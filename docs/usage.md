@@ -45,13 +45,14 @@
 ## Установка на Linux
 
 - **Debian, Ubuntu 24.04+, Kali, Mint 22+, Pop!_OS:** скачайте `hl100-drop_<версия>_amd64.deb` и установите: `sudo apt install ./hl100-drop_<версия>_amd64.deb`.
-- **Любой другой дистрибутив (Fedora, Arch, openSUSE…):** скачайте `HL100Drop-<версия>-x86_64.AppImage`, разрешите запуск (`chmod +x HL100Drop-*.AppImage`) и откройте файл.
+- **Любой дистрибутив с Flatpak, включая Ubuntu 22.04 и Debian 12:** скачайте `HL100Drop-<версия>-x86_64.flatpak` и откройте его в «Центре приложений» или выполните `flatpak install --user HL100Drop-<версия>-x86_64.flatpak`. Среда GNOME для него загрузится с Flathub автоматически.
+- **Другие дистрибутивы без Flatpak (Fedora, Arch, openSUSE…):** скачайте `HL100Drop-<версия>-x86_64.AppImage`, разрешите запуск (`chmod +x HL100Drop-*.AppImage`) и откройте файл.
 
 1. Запустите DROP из меню приложений, задайте имя и папку приёма.
 2. Закрытие окна оставляет DROP в трее; выход — через меню значка или Ctrl+Q.
 3. Файлы и папки можно перетащить на карточку получателя, выбрать кнопками на карточке или открыть «С помощью → DROP» из файлового менеджера. В Thunar и Dolphin есть пункт «Отправить → DROP».
 
-Требуется GTK 4.12 или новее (входит в дистрибутивы 2024 года и новее) и x86_64. Работает в сеансах Wayland и X11. Значок в трее отображается в KDE, Xfce, Cinnamon, MATE, LXQt и Budgie; в GNOME нужно расширение «AppIndicator and KStatusNotifierItem Support», без него DROP продолжает работать в фоне и открывается повторным запуском из меню.
+Для .deb и AppImage требуется GTK 4.12 или новее (дистрибутивы 2024 года и новее), Flatpak приносит GTK с собой. Все варианты — x86_64. Работает в сеансах Wayland и X11. Значок в трее отображается в KDE, Xfce, Cinnamon, MATE, LXQt и Budgie; в GNOME нужно расширение «AppIndicator and KStatusNotifierItem Support», без него DROP продолжает работать в фоне и открывается повторным запуском из меню.
 
 Если включён файрвол, разрешите TCP 41000 и UDP 41001. Пакет .deb добавляет готовые профили: `sudo ufw allow DROP` или `sudo firewall-cmd --permanent --add-service=hl100-drop && sudo firewall-cmd --reload`.
 

@@ -146,12 +146,11 @@ impl TrayHandle {
 /// (plain GNOME): the window then stays reachable from the app launcher.
 pub fn spawn(sender: async_channel::Sender<TrayEvent>) -> Option<TrayHandle> {
     use ksni::blocking::TrayMethods;
-    let sandboxed = std::path::Path::new("/.flatpak-info").exists();
     DropTray {
         sender,
         icons: pixmaps(),
     }
-    .disable_dbus_name(sandboxed)
+    .disable_dbus_name(crate::in_flatpak())
     .spawn()
     .map_err(|e| eprintln!("DROP: трей недоступен: {e}"))
     .ok()

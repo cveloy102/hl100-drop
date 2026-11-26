@@ -7,9 +7,10 @@
 | `src/ui.rs` | Окно, карточки устройств, передачи, настройки, drag and drop, уведомления |
 | `src/engine.rs` | Вызовы ядра в рабочем потоке, форматирование размеров и времени |
 | `src/tray.rs` | Значок StatusNotifierItem (KDE, Xfce, Cinnamon, MATE, LXQt, Budgie, waybar; GNOME с AppIndicator) |
-| `src/autostart.rs` | Автозапуск по XDG autostart, в Flatpak — через Background portal |
+| `src/autostart.rs` | Автозапуск по XDG autostart; Flatpak пишет ту же запись с `flatpak run` |
 | `src/updates.rs` | Проверка GitHub Releases; AppImage заменяет себя после проверки SHA-256, пакеты — через страницу релиза |
 | `src/settings.rs` | `~/.config/hl100-drop/settings.json` |
+| `flatpak/` | Манифест Flatpak (GNOME 50): сеть, домашняя папка и съёмные диски, трей; сборка — `scripts/build-flatpak.sh` |
 | `data/` | desktop-файл, иконка, AppStream, «Отправить» для Thunar и Dolphin, профили ufw и firewalld |
 
 ## Поведение

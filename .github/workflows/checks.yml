@@ -74,6 +74,18 @@ jobs:
           path: |
             artifacts/hl100-drop_*_amd64.deb
             artifacts/HL100Drop-*-x86_64.AppImage
+  flatpak:
+    runs-on: ubuntu-latest
+    container:
+      image: ghcr.io/flathub-infra/flatpak-github-actions:gnome-50
+      options: --privileged
+    steps:
+      - uses: actions/checkout@v4
+      - uses: flathub-infra/flatpak-github-actions/flatpak-builder@master
+        with:
+          manifest-path: apps/linux/flatpak/ru.hl100.drop.yml
+          bundle: HL100Drop-x86_64.flatpak
+          cache-key: flatpak-builder-${{ github.sha }}
   windows:
     runs-on: windows-latest
     steps:
