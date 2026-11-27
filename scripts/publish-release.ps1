@@ -1,7 +1,11 @@
-param([string]$Version = '1.1.4', [switch]$Stable)
+param([string]$Version = '1.2.0', [switch]$Stable)
 . "$PSScriptRoot/environment.ps1"
 $taskRepo = 'cveloy102/hl100-drop'
-$taskFiles = @("HL100DropSetup-$Version.exe", "HL100Drop-$Version.apk", "HL100Drop-$Version-universal.dmg")
+$taskFiles = @(
+    "HL100DropSetup-$Version.exe", "HL100Drop-$Version.apk", "HL100Drop-$Version-universal.dmg",
+    # Linux: from the CI artifacts linux-packages and HL100Drop-<version>-x86_64.flatpak.
+    "hl100-drop_${Version}_amd64.deb", "HL100Drop-$Version-x86_64.AppImage", "HL100Drop-$Version-x86_64.flatpak"
+)
 foreach ($taskFile in $taskFiles) { if (!(Test-Path (Join-Path $taskRoot "artifacts/$taskFile"))) { throw "Missing release asset: $taskFile" } }
 $taskChecksums = foreach ($taskFile in $taskFiles) {
     $taskHash = (Get-FileHash -Algorithm SHA256 -LiteralPath (Join-Path $taskRoot "artifacts/$taskFile")).Hash.ToLowerInvariant()

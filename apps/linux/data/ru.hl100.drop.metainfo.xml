@@ -32,6 +32,10 @@
     <binary>hl100-drop</binary>
   </provides>
   <releases>
-    <release version="1.1.4" date="2026-11-27"/>
+    <release version="1.2.0" date="2026-11-27">
+      <description>
+        <p>First Linux release.</p>
+      </description>
+    </release>
   </releases>
 </component>

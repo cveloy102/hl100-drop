@@ -6,8 +6,8 @@ android {
         applicationId = "ru.hl100.drop"
         minSdk = 31
         targetSdk = 35
-        versionCode = 12
-        versionName = "1.1.4"
+        versionCode = 13
+        versionName = "1.2.0"
         ndk { abiFilters += listOf("arm64-v8a", "x86_64") }
     }
     buildFeatures { compose = true; buildConfig = true }

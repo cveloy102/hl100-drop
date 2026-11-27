@@ -81,10 +81,12 @@ jobs:
       options: --privileged
     steps:
       - uses: actions/checkout@v4
+      - name: Версия для имени бандла
+        run: echo "DROP_VERSION=$(grep -m1 '^version' apps/linux/Cargo.toml | cut -d'"' -f2)" >> "$GITHUB_ENV"
       - uses: flathub-infra/flatpak-github-actions/flatpak-builder@master
         with:
           manifest-path: apps/linux/flatpak/ru.hl100.drop.yml
-          bundle: HL100Drop-x86_64.flatpak
+          bundle: HL100Drop-${{ env.DROP_VERSION }}-x86_64.flatpak
           cache-key: flatpak-builder-${{ github.sha }}
   windows:
     runs-on: windows-latest
