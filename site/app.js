@@ -16,7 +16,8 @@ if (document.querySelector('[data-asset]')) {
     .then(release => {
       const version = release.tag_name?.replace(/^v/, '');
       if (!/^\d+\.\d+\.\d+$/.test(version) || release.draft || release.prerelease) return;
-      const names = {windows: `HL100DropSetup-${version}.exe`, android: `HL100Drop-${version}.apk`, macos: `HL100Drop-${version}-universal.dmg`};
+      const names = {windows: `HL100DropSetup-${version}.exe`, android: `HL100Drop-${version}.apk`, macos: `HL100Drop-${version}-universal.dmg`,
+        linuxDeb: `hl100-drop_${version}_amd64.deb`, linuxFlatpak: `HL100Drop-${version}-x86_64.flatpak`, linuxAppImage: `HL100Drop-${version}-x86_64.AppImage`};
       const links = Object.fromEntries(Object.entries(names).map(([platform, name]) => [platform, release.assets?.find(asset => asset.name === name)?.browser_download_url]));
       if (!Object.values(links).every(url => typeof url === 'string' && url.startsWith(`https://github.com/${repo}/releases/download/`))) return;
       document.querySelectorAll('[data-version]').forEach(node => node.textContent = `V ${version}`);
