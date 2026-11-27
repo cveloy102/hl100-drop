@@ -84,10 +84,47 @@ struct Ui {
     initialized: Cell<bool>,
 }
 
+/// Text scale the desktop asks for (Xft.dpi / 96). GTK 4 applies it only to
+/// `pt` sizes, and the stylesheet uses `px`, so we apply it ourselves.
+fn ui_scale() -> f64 {
+    let dpi = gtk::Settings::default()
+        .map(|s| s.gtk_xft_dpi())
+        .filter(|&v| v > 0)
+        .map(|v| v as f64 / 1024.0)
+        .unwrap_or(96.0);
+    (dpi / 96.0).clamp(1.0, 3.0)
+}
+
+/// Multiplies every `Npx` in the stylesheet by `scale`; 1px hairlines stay 1px.
+fn scale_css(css: &str, scale: f64) -> String {
+    if (scale - 1.0).abs() < 0.01 {
+        return css.to_owned();
+    }
+    let mut out = String::with_capacity(css.len());
+    let mut rest = css;
+    while let Some(pos) = rest.find("px") {
+        let head = &rest[..pos];
+        let start = head
+            .rfind(|c: char| !(c.is_ascii_digit() || c == '.'))
+            .map_or(0, |i| i + 1);
+        out.push_str(&head[..start]);
+        match head[start..].parse::<f64>() {
+            Ok(n) if n > 1.0 => out.push_str(&format!("{}px", (n * scale).round())),
+            _ => {
+                out.push_str(&head[start..]);
+                out.push_str("px");
+            }
+        }
+        rest = &rest[pos + 2..];
+    }
+    out.push_str(rest);
+    out
+}
+
 pub fn startup(_app: &gtk::Application) {
     prefer_dark();
     let provider = gtk::CssProvider::new();
-    provider.load_from_string(CSS);
+    provider.load_from_string(&scale_css(CSS, ui_scale()));
     if let Some(display) = gdk::Display::default() {
         gtk::style_context_add_provider_for_display(
             &display,
@@ -173,6 +210,7 @@ fn button(text: &str, class: &str) -> gtk::Button {
 
 fn mark(size: i32) -> gtk::DrawingArea {
     let area = gtk::DrawingArea::new();
+    let size = (size as f64 * ui_scale()) as i32;
     area.set_content_width(size);
     area.set_content_height(size);
     area.set_valign(gtk::Align::Center);
@@ -206,11 +244,11 @@ impl Ui {
         let window = gtk::ApplicationWindow::builder()
             .application(app)
             .title("DROP")
-            .default_width(1080)
-            .default_height(800)
+            .default_width((1080.0 * ui_scale()) as i32)
+            .default_height((800.0 * ui_scale()) as i32)
             .build();
         window.add_css_class("drop");
-        window.set_size_request(600, 520);
+        window.set_size_request((600.0 * ui_scale()) as i32, (520.0 * ui_scale()) as i32);
 
         let frame = gtk::Box::new(gtk::Orientation::Vertical, 0);
         let root = gtk::Box::new(gtk::Orientation::Vertical, 0);
