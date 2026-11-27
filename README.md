@@ -6,10 +6,10 @@
 
 Установите DROP на оба устройства. Для каждого выберите свою систему.
 
-- **Windows 10+ x64** — [Установщик EXE](https://github.com/cveloy102/hl100-drop/releases/download/v1.1.4/HL100DropSetup-1.1.4.exe) · [Установка на Windows](docs/usage.md#установка-на-windows).
-- **Android 12+ (ARM64, x86_64)** — [Приложение APK](https://github.com/cveloy102/hl100-drop/releases/download/v1.1.4/HL100Drop-1.1.4.apk) · [Установка на Android](docs/usage.md#установка-на-android).
-- **Linux x86_64** — пакет `.deb` для Debian / Ubuntu / Kali / Mint, `Flatpak` для любого дистрибутива (включая Ubuntu 22.04 и Debian 12) или `AppImage`, со страницы [релизов](https://github.com/cveloy102/hl100-drop/releases) · [Установка на Linux](docs/usage.md#установка-на-linux).
-- **macOS 12+ (Intel, Apple Silicon)** — [Образ DMG](https://github.com/cveloy102/hl100-drop/releases/download/v1.1.4/HL100Drop-1.1.4-universal.dmg) · [Установка на macOS](docs/usage.md#установка-на-macos).
+- **Windows 10+ x64** — [Установщик EXE](https://github.com/cveloy102/hl100-drop/releases/download/v1.2.0/HL100DropSetup-1.2.0.exe) · [Установка на Windows](docs/usage.md#установка-на-windows).
+- **Android 12+ (ARM64, x86_64)** — [Приложение APK](https://github.com/cveloy102/hl100-drop/releases/download/v1.2.0/HL100Drop-1.2.0.apk) · [Установка на Android](docs/usage.md#установка-на-android).
+- **Linux x86_64** — [Пакет DEB](https://github.com/cveloy102/hl100-drop/releases/download/v1.2.0/hl100-drop_1.2.0_amd64.deb) для Ubuntu 24.04+ / Debian 13+ / Kali / Mint 22+ · [Flatpak](https://github.com/cveloy102/hl100-drop/releases/download/v1.2.0/HL100Drop-1.2.0-x86_64.flatpak) для любого дистрибутива, включая Ubuntu 22.04 и Debian 12 · [AppImage](https://github.com/cveloy102/hl100-drop/releases/download/v1.2.0/HL100Drop-1.2.0-x86_64.AppImage) без установки · [Установка на Linux](docs/usage.md#установка-на-linux).
+- **macOS 12+ (Intel, Apple Silicon)** — [Образ DMG](https://github.com/cveloy102/hl100-drop/releases/download/v1.2.0/HL100Drop-1.2.0-universal.dmg) · [Установка на macOS](docs/usage.md#установка-на-macos).
 
 ## Начало работы
 
