@@ -10,6 +10,11 @@ use std::time::{Duration, Instant};
 
 pub const APP_ID: &str = "ru.hl100.drop";
 
+/// Running inside the Flatpak sandbox (autostart and tray need other routes).
+pub fn in_flatpak() -> bool {
+    std::path::Path::new("/.flatpak-info").exists()
+}
+
 fn main() -> glib::ExitCode {
     // After a self-update the new image waits for the old process to release the
     // single-instance D-Bus name; otherwise it would just hand its arguments over.

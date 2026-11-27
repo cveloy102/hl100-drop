@@ -1404,10 +1404,17 @@ impl Ui {
             // Package-manager installs: hand over to the release page.
             let launcher = gtk::UriLauncher::new(&release.page);
             launcher.launch(Some(&self.window), gio::Cancellable::NONE, |_| {});
-            self.update_text.set_text(&format!(
-                "Версия {}: скачайте пакет для своего дистрибутива на странице релиза",
-                release.version
-            ));
+            self.update_text.set_text(&if crate::in_flatpak() {
+                format!(
+                    "Версия {}: скачайте новый файл .flatpak на странице релиза и откройте его",
+                    release.version
+                )
+            } else {
+                format!(
+                    "Версия {}: скачайте пакет для своего дистрибутива на странице релиза",
+                    release.version
+                )
+            });
             return;
         }
         if busy {

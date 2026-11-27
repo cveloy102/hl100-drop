@@ -1,0 +1,58 @@
+# Flatpak build of DROP for Linux. Runs on any distribution with Flatpak,
+# including older ones (Ubuntu 22.04, Debian 12) whose GTK is too old for the .deb.
+#
+#   bash scripts/build-flatpak.sh
+id: ru.hl100.drop
+runtime: org.gnome.Platform
+runtime-version: '50'
+sdk: org.gnome.Sdk
+sdk-extensions:
+  - org.freedesktop.Sdk.Extension.rust-stable
+command: hl100-drop
+finish-args:
+  # Discovery (UDP multicast/broadcast) and direct TCP transfers on the LAN.
+  - --share=network
+  - --share=ipc
+  - --socket=wayland
+  - --socket=fallback-x11
+  - --device=dri
+  # Receive into any folder the user picks and reveal received files; sending
+  # also works for files outside home through the file chooser and drag and drop.
+  - --filesystem=home
+  - --filesystem=/media
+  - --filesystem=/run/media
+  # Tray icon (StatusNotifierItem).
+  - --talk-name=org.kde.StatusNotifierWatcher
+build-options:
+  append-path: /usr/lib/sdk/rust-stable/bin
+  env:
+    CARGO_HOME: /run/build/hl100-drop/cargo
+    CARGO_NET_OFFLINE: 'false'
+modules:
+  - name: hl100-drop
+    buildsystem: simple
+    build-options:
+      # Crates are fetched at build time; a Flathub submission would vendor
+      # them with flatpak-cargo-generator instead.
+      build-args:
+        - --share=network
+    build-commands:
+      - cargo build --release --locked -p hl100-drop
+      - install -Dm755 target/release/hl100-drop /app/bin/hl100-drop
+      - install -Dm644 apps/linux/data/ru.hl100.drop.desktop /app/share/applications/ru.hl100.drop.desktop
+      - install -Dm644 apps/linux/data/ru.hl100.drop.svg /app/share/icons/hicolor/scalable/apps/ru.hl100.drop.svg
+      - install -Dm644 apps/linux/data/ru.hl100.drop.metainfo.xml /app/share/metainfo/ru.hl100.drop.metainfo.xml
+    sources:
+      - type: dir
+        path: ../../..
+        skip:
+          - target
+          - artifacts
+          - .flatpak-builder
+          - .tools
+          - apps/android
+          - apps/windows
+          - apps/macos
+          - installer
+          - site
+          - docs
