@@ -79,17 +79,23 @@ AppImage собирается скриптом `build-linux.sh`, если ука
 
 ## Выпуск стабильной версии
 
-1. Обновите `core/Cargo.toml` и запись `hl100_core` в Cargo.lock, Windows Version, Android versionName / растущий versionCode, значения скриптов и установщика. Mac-версия берётся из Cargo.
+1. Обновите `core/Cargo.toml`, `apps/linux/Cargo.toml` и их записи в Cargo.lock, Windows Version, Android versionName / растущий versionCode, значения скриптов и установщика, `<release>` в `apps/linux/data/ru.hl100.drop.metainfo.xml`. Mac-версия берётся из Cargo.
 2. Обновите `CHANGELOG.md` и русские `scripts/release-notes.md`.
 3. Запустите CI и проверки на реальных устройствах для изменённого поведения.
-4. Соберите Windows и **подписанный** Android; скачайте DMG из успешного CI нужного коммита. Все три файла должны лежать в `artifacts/`.
+4. Соберите Windows и **подписанный** Android. Из успешного CI нужного коммита скачайте DMG (`macos-universal-installer`), `.deb` и AppImage (`linux-packages`) и Flatpak (`HL100Drop-<версия>-x86_64.flatpak`). Все шесть файлов должны лежать в `artifacts/`:
+
+```powershell
+# run-id — успешный запуск «Сборка и проверка» на коммите релиза (gh run list --branch main)
+gh run download <run-id> -n macos-universal-installer -n linux-packages -p "HL100Drop-*flatpak" -D artifacts/ci
+Get-ChildItem artifacts/ci -Recurse -File -Include *.dmg,*.deb,*.AppImage,*.flatpak | Move-Item -Destination artifacts -Force
+```
 5. Опубликуйте:
 
 ```powershell
 ./scripts/publish-release.ps1 -Version 1.1.1 -Stable
 ```
 
-Скрипт использует локальный Git Credential Manager, создаёт tag / Release, SHA-256 и загружает три установочных файла. Релиз сначала создаётся как черновик; видимым становится после загрузки всех файлов. Ошибка оставляет черновик для исправления, а не частично заполненный канал обновлений. Без `-Stable` выпуск предварительный и не виден обновлятору.
+Скрипт использует локальный Git Credential Manager, создаёт tag / Release, SHA-256 и загружает шесть установочных файлов. Релиз сначала создаётся как черновик; видимым становится после загрузки всех файлов. Ошибка оставляет черновик для исправления, а не частично заполненный канал обновлений. Без `-Stable` выпуск предварительный и не виден обновлятору.
 
 6. Проверьте `/releases/latest`, имена и SHA-256 assets, затем обновление с предыдущей установленной версии на всех платформах.
 

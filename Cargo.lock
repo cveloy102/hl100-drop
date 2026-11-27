@@ -803,7 +803,7 @@ checksum = "7f24254aa9a54b5c858eaee2f5bccdb46aaf0e486a595ed5fd8f86ba55232a70"
 
 [[package]]
 name = "hl100-drop"
-version = "1.1.4"
+version = "1.2.0"
 dependencies = [
  "async-channel",
  "gtk4",
@@ -817,7 +817,7 @@ dependencies = [
 
 [[package]]
 name = "hl100_core"
-version = "1.1.4"
+version = "1.2.0"
 dependencies = [
  "if-addrs",
  "jni",
